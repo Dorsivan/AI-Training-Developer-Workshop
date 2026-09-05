@@ -1,0 +1,658 @@
+# PIPELINE DEFINITION
+# Name: data-validation-and-processing-pipeline
+# Description: Validates ingested data quality and conditionally transforms good data or quarantines bad data with an alert notification. Dynamically provisions a PVC via CreatePVC and cleans up with DeletePVC.
+# Inputs:
+#    null_fraction: float [Default: 0.05]
+#    num_rows: int [Default: 100.0]
+#    pvc_size: str [Default: '1Gi']
+#    quality_threshold: float [Default: 0.8]
+#    storage_class: str [Default: '']
+components:
+  comp-condition-2:
+    dag:
+      tasks:
+        generate-report:
+          cachingOptions:
+            enableCache: true
+          componentRef:
+            name: comp-generate-report
+          dependentTasks:
+          - transform-data
+          inputs:
+            parameters:
+              row_count:
+                taskOutputParameter:
+                  outputParameterKey: Output
+                  producerTask: transform-data
+          taskInfo:
+            name: generate-report
+        transform-data:
+          cachingOptions:
+            enableCache: true
+          componentRef:
+            name: comp-transform-data
+          taskInfo:
+            name: transform-data
+    inputDefinitions:
+      parameters:
+        pipelinechannel--quality_threshold:
+          parameterType: NUMBER_DOUBLE
+        pipelinechannel--validate-data-Output:
+          parameterType: NUMBER_DOUBLE
+  comp-condition-3:
+    dag:
+      tasks:
+        quarantine-data:
+          cachingOptions:
+            enableCache: true
+          componentRef:
+            name: comp-quarantine-data
+          taskInfo:
+            name: quarantine-data
+        send-alert:
+          cachingOptions:
+            enableCache: true
+          componentRef:
+            name: comp-send-alert
+          dependentTasks:
+          - quarantine-data
+          inputs:
+            parameters:
+              quarantine_path:
+                taskOutputParameter:
+                  outputParameterKey: Output
+                  producerTask: quarantine-data
+          taskInfo:
+            name: send-alert
+    inputDefinitions:
+      parameters:
+        pipelinechannel--quality_threshold:
+          parameterType: NUMBER_DOUBLE
+        pipelinechannel--validate-data-Output:
+          parameterType: NUMBER_DOUBLE
+  comp-condition-branches-1:
+    dag:
+      tasks:
+        condition-2:
+          componentRef:
+            name: comp-condition-2
+          inputs:
+            parameters:
+              pipelinechannel--quality_threshold:
+                componentInputParameter: pipelinechannel--quality_threshold
+              pipelinechannel--validate-data-Output:
+                componentInputParameter: pipelinechannel--validate-data-Output
+          taskInfo:
+            name: condition-2
+          triggerPolicy:
+            condition: inputs.parameter_values['pipelinechannel--validate-data-Output']
+              >= inputs.parameter_values['pipelinechannel--quality_threshold']
+        condition-3:
+          componentRef:
+            name: comp-condition-3
+          inputs:
+            parameters:
+              pipelinechannel--quality_threshold:
+                componentInputParameter: pipelinechannel--quality_threshold
+              pipelinechannel--validate-data-Output:
+                componentInputParameter: pipelinechannel--validate-data-Output
+          taskInfo:
+            name: condition-3
+          triggerPolicy:
+            condition: '!(inputs.parameter_values[''pipelinechannel--validate-data-Output'']
+              >= inputs.parameter_values[''pipelinechannel--quality_threshold''])'
+    inputDefinitions:
+      parameters:
+        pipelinechannel--quality_threshold:
+          parameterType: NUMBER_DOUBLE
+        pipelinechannel--validate-data-Output:
+          parameterType: NUMBER_DOUBLE
+  comp-createpvc:
+    executorLabel: exec-createpvc
+    inputDefinitions:
+      parameters:
+        access_modes:
+          description: 'AccessModes to request for the provisioned PVC. May
+
+            be one or more of ``''ReadWriteOnce''``, ``''ReadOnlyMany''``, ``''ReadWriteMany''``,
+            or
+
+            ``''ReadWriteOncePod''``. Corresponds to `PersistentVolumeClaim.spec.accessModes
+            <https://kubernetes.io/docs/concepts/storage/persistent-volumes/#access-modes>`_.'
+          parameterType: LIST
+        annotations:
+          description: Annotations for the PVC's metadata. Corresponds to `PersistentVolumeClaim.metadata.annotations
+            <https://kubernetes.io/docs/reference/kubernetes-api/config-and-storage-resources/persistent-volume-claim-v1/#PersistentVolumeClaim>`_.
+          isOptional: true
+          parameterType: STRUCT
+        pvc_name:
+          description: 'Name of the PVC. Corresponds to `PersistentVolumeClaim.metadata.name
+            <https://kubernetes.io/docs/reference/kubernetes-api/config-and-storage-resources/persistent-volume-claim-v1/#PersistentVolumeClaim>`_.
+            Only one of ``pvc_name`` and ``pvc_name_suffix`` can
+
+            be provided.'
+          isOptional: true
+          parameterType: STRING
+        pvc_name_suffix:
+          description: 'Prefix to use for a dynamically generated name, which
+
+            will take the form ``<argo-workflow-name>-<pvc_name_suffix>``. Only one
+
+            of ``pvc_name`` and ``pvc_name_suffix`` can be provided.'
+          isOptional: true
+          parameterType: STRING
+        size:
+          description: The size of storage requested by the PVC that will be provisioned.
+            For example, ``'5Gi'``. Corresponds to `PersistentVolumeClaim.spec.resources.requests.storage
+            <https://kubernetes.io/docs/reference/kubernetes-api/config-and-storage-resources/persistent-volume-claim-v1/#PersistentVolumeClaimSpec>`_.
+          parameterType: STRING
+        storage_class_name:
+          defaultValue: ''
+          description: 'Name of StorageClass from which to provision the PV
+
+            to back the PVC. ``None`` indicates to use the cluster''s default
+
+            storage_class_name. Set to ``''''`` for a statically specified PVC.'
+          isOptional: true
+          parameterType: STRING
+        volume_name:
+          description: 'Pre-existing PersistentVolume that should back the
+
+            provisioned PersistentVolumeClaim. Used for statically
+
+            specified PV only. Corresponds to `PersistentVolumeClaim.spec.volumeName
+            <https://kubernetes.io/docs/reference/kubernetes-api/config-and-storage-resources/persistent-volume-claim-v1/#PersistentVolumeClaimSpec>`_.'
+          isOptional: true
+          parameterType: STRING
+    outputDefinitions:
+      parameters:
+        name:
+          parameterType: STRING
+  comp-deletepvc:
+    executorLabel: exec-deletepvc
+    inputDefinitions:
+      parameters:
+        pvc_name:
+          description: Name of the PVC to delete. Supports passing a runtime-generated
+            name, such as a name provided by ``kubernetes.CreatePvcOp().outputs['name']``.
+          parameterType: STRING
+  comp-generate-report:
+    executorLabel: exec-generate-report
+    inputDefinitions:
+      parameters:
+        row_count:
+          parameterType: NUMBER_INTEGER
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+  comp-ingest-data:
+    executorLabel: exec-ingest-data
+    inputDefinitions:
+      parameters:
+        null_fraction:
+          parameterType: NUMBER_DOUBLE
+        num_rows:
+          parameterType: NUMBER_INTEGER
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+  comp-quarantine-data:
+    executorLabel: exec-quarantine-data
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+  comp-send-alert:
+    executorLabel: exec-send-alert
+    inputDefinitions:
+      parameters:
+        quarantine_path:
+          parameterType: STRING
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+  comp-transform-data:
+    executorLabel: exec-transform-data
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: NUMBER_INTEGER
+  comp-validate-data:
+    executorLabel: exec-validate-data
+    inputDefinitions:
+      parameters:
+        data_path:
+          parameterType: STRING
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: NUMBER_DOUBLE
+deploymentSpec:
+  executors:
+    exec-createpvc:
+      container:
+        image: argostub/createpvc
+    exec-deletepvc:
+      container:
+        image: argostub/deletepvc
+    exec-generate-report:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - generate_report
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.12.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef generate_report(row_count: int) -> str:\n    \"\"\"Generate a\
+          \ summary report from the clean data.\n\n    Reads  /mnt/shared/clean_data.csv\n\
+          \    Writes /mnt/shared/report.json\n    Returns the summary as a JSON string.\n\
+          \    \"\"\"\n    import csv\n    import json\n\n    input_path = \"/mnt/shared/clean_data.csv\"\
+          \n    output_path = \"/mnt/shared/report.json\"\n\n    with open(input_path,\
+          \ \"r\") as f:\n        reader = csv.DictReader(f)\n        rows = list(reader)\n\
+          \n    # Compute summary statistics on the 'value' column.\n    values =\
+          \ []\n    categories: dict = {}\n    for row in rows:\n        try:\n  \
+          \          val = float(row[\"value\"])\n            values.append(val)\n\
+          \        except (ValueError, KeyError):\n            pass\n        cat =\
+          \ row.get(\"category\", \"unknown\")\n        categories[cat] = categories.get(cat,\
+          \ 0) + 1\n\n    summary = {\n        \"total_clean_rows\": len(rows),\n\
+          \        \"rows_after_transform\": row_count,\n        \"value_stats\":\
+          \ {\n            \"min\": round(min(values), 2) if values else None,\n \
+          \           \"max\": round(max(values), 2) if values else None,\n      \
+          \      \"mean\": round(sum(values) / len(values), 2) if values else None,\n\
+          \        },\n        \"category_distribution\": categories,\n    }\n\n \
+          \   with open(output_path, \"w\") as f:\n        json.dump(summary, f, indent=2)\n\
+          \n    summary_str = json.dumps(summary)\n    print(f\"Report generated:\
+          \ {summary_str}\")\n    return summary_str\n\n"
+        image: registry.redhat.io/ubi9/python-311:latest
+    exec-ingest-data:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - ingest_data
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.12.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef ingest_data(num_rows: int, null_fraction: float) -> str:\n  \
+          \  \"\"\"Generate a synthetic dataset and write it to the shared PVC.\"\"\
+          \"\n    import csv\n    import random\n\n    random.seed(42)\n\n    headers\
+          \ = [\"id\", \"name\", \"value\", \"category\"]\n    categories = [\"A\"\
+          , \"B\", \"C\", \"D\"]\n    names = [\n        \"Alice\", \"Bob\", \"Charlie\"\
+          , \"Diana\",\n        \"Eve\", \"Frank\", \"Grace\", \"Hank\",\n    ]\n\n\
+          \    output_path = \"/mnt/shared/raw_data.csv\"\n\n    with open(output_path,\
+          \ \"w\", newline=\"\") as f:\n        writer = csv.writer(f)\n        writer.writerow(headers)\n\
+          \n        for i in range(1, num_rows + 1):\n            row = [\n      \
+          \          i,\n                random.choice(names),\n                round(random.uniform(1.0,\
+          \ 100.0), 2),\n                random.choice(categories),\n            ]\n\
+          \            # Randomly inject null values to make validation interesting.\n\
+          \            for col_idx in range(len(row)):\n                if random.random()\
+          \ < null_fraction:\n                    row[col_idx] = \"\"\n          \
+          \  writer.writerow(row)\n\n    print(f\"Ingested {num_rows} rows to {output_path}\"\
+          )\n    return output_path\n\n"
+        image: registry.redhat.io/ubi9/python-311:latest
+    exec-quarantine-data:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - quarantine_data
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.12.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef quarantine_data() -> str:\n    \"\"\"Copy raw data to a quarantine\
+          \ directory on the PVC.\n\n    Reads  /mnt/shared/raw_data.csv\n    Writes\
+          \ /mnt/shared/quarantine/raw_data.csv\n    Returns the quarantine file path.\n\
+          \    \"\"\"\n    import os\n    import shutil\n\n    source_path = \"/mnt/shared/raw_data.csv\"\
+          \n    quarantine_dir = \"/mnt/shared/quarantine\"\n    os.makedirs(quarantine_dir,\
+          \ exist_ok=True)\n\n    quarantine_path = os.path.join(quarantine_dir, \"\
+          raw_data.csv\")\n    shutil.copy2(source_path, quarantine_path)\n\n    print(f\"\
+          Data quarantined to {quarantine_path}\")\n    return quarantine_path\n\n"
+        image: registry.redhat.io/ubi9/python-311:latest
+    exec-send-alert:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - send_alert
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.12.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef send_alert(quarantine_path: str) -> str:\n    \"\"\"Log an alert\
+          \ about quarantined data and return the alert message.\"\"\"\n    alert_message\
+          \ = (\n        f\"ALERT: Data quality check FAILED. \"\n        f\"Raw data\
+          \ has been quarantined to: {quarantine_path}. \"\n        f\"Please review\
+          \ the data and re-submit after fixing quality issues.\"\n    )\n    print(\"\
+          =\" * 60)\n    print(\"ALERT NOTIFICATION\")\n    print(\"=\" * 60)\n  \
+          \  print(alert_message)\n    print(\"=\" * 60)\n    return alert_message\n\
+          \n"
+        image: registry.redhat.io/ubi9/python-311:latest
+    exec-transform-data:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - transform_data
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.12.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef transform_data() -> int:\n    \"\"\"Clean the raw data: drop\
+          \ rows with nulls, remove duplicates.\n\n    Reads  /mnt/shared/raw_data.csv\n\
+          \    Writes /mnt/shared/clean_data.csv\n    Returns the number of clean\
+          \ rows.\n    \"\"\"\n    import csv\n\n    input_path = \"/mnt/shared/raw_data.csv\"\
+          \n    output_path = \"/mnt/shared/clean_data.csv\"\n\n    with open(input_path,\
+          \ \"r\") as f:\n        reader = csv.DictReader(f)\n        headers = reader.fieldnames\n\
+          \        rows = list(reader)\n\n    # Drop rows with any null / empty values.\n\
+          \    clean_rows = []\n    for row in rows:\n        if all(v is not None\
+          \ and v.strip() != \"\" for v in row.values()):\n            clean_rows.append(row)\n\
+          \n    # Remove duplicate rows.\n    seen: set = set()\n    unique_rows =\
+          \ []\n    for row in clean_rows:\n        row_tuple = tuple(row.values())\n\
+          \        if row_tuple not in seen:\n            unique_rows.append(row)\n\
+          \            seen.add(row_tuple)\n\n    with open(output_path, \"w\", newline=\"\
+          \") as f:\n        writer = csv.DictWriter(f, fieldnames=headers)\n    \
+          \    writer.writeheader()\n        writer.writerows(unique_rows)\n\n   \
+          \ print(f\"Transformed data: {len(rows)} -> {len(unique_rows)} rows\")\n\
+          \    print(f\"Written to {output_path}\")\n    return len(unique_rows)\n\
+          \n"
+        image: registry.redhat.io/ubi9/python-311:latest
+    exec-validate-data:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - validate_data
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.12.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef validate_data(data_path: str) -> float:\n    \"\"\"Read raw data\
+          \ from the PVC, compute a quality score (0.0 - 1.0).\n\n    Checks performed:\n\
+          \      - Null / empty cell count\n      - Duplicate row count\n      - Minimum\
+          \ row-count threshold (>= 10)\n\n    Writes a validation report to /mnt/shared/validation_report.json.\n\
+          \    Returns the quality_score as a float so it can drive conditional branching.\n\
+          \    \"\"\"\n    import csv\n    import json\n\n    input_path = \"/mnt/shared/raw_data.csv\"\
+          \n\n    with open(input_path, \"r\") as f:\n        reader = csv.DictReader(f)\n\
+          \        rows = list(reader)\n\n    total_rows = len(rows)\n    if total_rows\
+          \ == 0:\n        print(\"No data found!\")\n        quality_score = 0.0\n\
+          \        report = {\n            \"total_rows\": 0,\n            \"null_count\"\
+          : 0,\n            \"duplicate_count\": 0,\n            \"quality_score\"\
+          : quality_score,\n        }\n        with open(\"/mnt/shared/validation_report.json\"\
+          , \"w\") as f:\n            json.dump(report, f, indent=2)\n        return\
+          \ quality_score\n\n    # Count null / empty cells.\n    null_count = 0\n\
+          \    total_cells = 0\n    for row in rows:\n        for value in row.values():\n\
+          \            total_cells += 1\n            if value is None or value.strip()\
+          \ == \"\":\n                null_count += 1\n\n    # Count duplicate rows\
+          \ (by all column values).\n    seen: set = set()\n    duplicate_count =\
+          \ 0\n    for row in rows:\n        row_tuple = tuple(row.values())\n   \
+          \     if row_tuple in seen:\n            duplicate_count += 1\n        seen.add(row_tuple)\n\
+          \n    # Quality score: penalise nulls and duplicates, reward sufficient\
+          \ rows.\n    null_penalty = null_count / total_cells if total_cells > 0\
+          \ else 0\n    duplicate_penalty = duplicate_count / total_rows if total_rows\
+          \ > 0 else 0\n    row_count_factor = 1.0 if total_rows >= 10 else total_rows\
+          \ / 10.0\n\n    quality_score = max(\n        0.0,\n        min(1.0, (1.0\
+          \ - null_penalty - duplicate_penalty) * row_count_factor),\n    )\n\n  \
+          \  report = {\n        \"total_rows\": total_rows,\n        \"total_cells\"\
+          : total_cells,\n        \"null_count\": null_count,\n        \"duplicate_count\"\
+          : duplicate_count,\n        \"null_rate\": round(null_penalty, 4),\n   \
+          \     \"duplicate_rate\": round(duplicate_penalty, 4),\n        \"quality_score\"\
+          : round(quality_score, 4),\n    }\n\n    with open(\"/mnt/shared/validation_report.json\"\
+          , \"w\") as f:\n        json.dump(report, f, indent=2)\n\n    print(f\"\
+          Validation complete: quality_score={quality_score:.4f}\")\n    print(\n\
+          \        f\"  Total rows: {total_rows}, Nulls: {null_count}, \"\n      \
+          \  f\"Duplicates: {duplicate_count}\"\n    )\n    return quality_score\n\
+          \n"
+        image: registry.redhat.io/ubi9/python-311:latest
+pipelineInfo:
+  description: Validates ingested data quality and conditionally transforms good data
+    or quarantines bad data with an alert notification. Dynamically provisions a PVC
+    via CreatePVC and cleans up with DeletePVC.
+  name: data-validation-and-processing-pipeline
+root:
+  dag:
+    tasks:
+      condition-branches-1:
+        componentRef:
+          name: comp-condition-branches-1
+        dependentTasks:
+        - createpvc
+        - validate-data
+        inputs:
+          parameters:
+            pipelinechannel--quality_threshold:
+              componentInputParameter: quality_threshold
+            pipelinechannel--validate-data-Output:
+              taskOutputParameter:
+                outputParameterKey: Output
+                producerTask: validate-data
+        taskInfo:
+          name: condition-branches-1
+      createpvc:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-createpvc
+        inputs:
+          parameters:
+            access_modes:
+              runtimeValue:
+                constant:
+                - ReadWriteOnce
+            pvc_name_suffix:
+              runtimeValue:
+                constant: -shared-data
+            size:
+              componentInputParameter: pvc_size
+            storage_class_name:
+              componentInputParameter: storage_class
+        taskInfo:
+          name: createpvc
+      deletepvc:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-deletepvc
+        dependentTasks:
+        - condition-branches-1
+        - createpvc
+        inputs:
+          parameters:
+            pvc_name:
+              taskOutputParameter:
+                outputParameterKey: name
+                producerTask: createpvc
+        taskInfo:
+          name: deletepvc
+      ingest-data:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-ingest-data
+        dependentTasks:
+        - createpvc
+        inputs:
+          parameters:
+            null_fraction:
+              componentInputParameter: null_fraction
+            num_rows:
+              componentInputParameter: num_rows
+        taskInfo:
+          name: ingest-data
+      validate-data:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-validate-data
+        dependentTasks:
+        - createpvc
+        - ingest-data
+        inputs:
+          parameters:
+            data_path:
+              taskOutputParameter:
+                outputParameterKey: Output
+                producerTask: ingest-data
+        taskInfo:
+          name: validate-data
+  inputDefinitions:
+    parameters:
+      null_fraction:
+        defaultValue: 0.05
+        isOptional: true
+        parameterType: NUMBER_DOUBLE
+      num_rows:
+        defaultValue: 100.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      pvc_size:
+        defaultValue: 1Gi
+        isOptional: true
+        parameterType: STRING
+      quality_threshold:
+        defaultValue: 0.8
+        isOptional: true
+        parameterType: NUMBER_DOUBLE
+      storage_class:
+        defaultValue: ''
+        isOptional: true
+        parameterType: STRING
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.12.1
+---
+platforms:
+  kubernetes:
+    deploymentSpec:
+      executors:
+        exec-generate-report:
+          pvcMount:
+          - mountPath: /mnt/shared
+            taskOutputParameter:
+              outputParameterKey: name
+              producerTask: createpvc
+        exec-ingest-data:
+          pvcMount:
+          - mountPath: /mnt/shared
+            taskOutputParameter:
+              outputParameterKey: name
+              producerTask: createpvc
+        exec-quarantine-data:
+          pvcMount:
+          - mountPath: /mnt/shared
+            taskOutputParameter:
+              outputParameterKey: name
+              producerTask: createpvc
+        exec-transform-data:
+          pvcMount:
+          - mountPath: /mnt/shared
+            taskOutputParameter:
+              outputParameterKey: name
+              producerTask: createpvc
+        exec-validate-data:
+          pvcMount:
+          - mountPath: /mnt/shared
+            taskOutputParameter:
+              outputParameterKey: name
+              producerTask: createpvc

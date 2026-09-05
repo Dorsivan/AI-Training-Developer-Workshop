@@ -1,0 +1,24 @@
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: ClusterQueue
+metadata:
+  name: pipeline-cluster-queue
+spec:
+  preemption:
+    withinClusterQueue: LowerPriority
+    reclaimWithinCohort: Any
+  namespaceSelector: {}
+  resourceGroups:
+    - coveredResources: ["cpu", "memory"]
+      flavors:
+        - name: default-flavor
+          resources:
+            - name: "cpu"
+              nominalQuota: 8
+            - name: "memory"
+              nominalQuota: "16Gi"
+    - coveredResources: ["nvidia.com/gpu"]
+      flavors:
+        - name: gpu-flavor
+          resources:
+            - name: "nvidia.com/gpu"
+              nominalQuota: 2

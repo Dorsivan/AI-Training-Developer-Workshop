@@ -1,0 +1,10 @@
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: LocalQueue
+metadata:
+  name: pipeline-local-queue
+  # Update the namespace to match your OpenShift AI project.
+  namespace: iris-pipeline-demo
+  annotations:
+    kueue.x-k8s.io/default-queue: "true"
+spec:
+  clusterQueue: pipeline-cluster-queue

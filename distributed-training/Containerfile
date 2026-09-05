@@ -1,0 +1,11 @@
+ARG PYTORCH_BASE=quay.io/modh/training:py312-cuda128-torch280
+FROM ${PYTORCH_BASE}
+USER 0
+COPY requirements-training.txt /tmp/requirements-training.txt
+RUN python -m pip install --no-cache-dir -r /tmp/requirements-training.txt
+COPY train_fsdp.py /opt/training/train_fsdp.py
+RUN chgrp -R 0 /opt/training && chmod -R g=u /opt/training
+RUN python -c 'import torch; assert torch.__version__.split("+")[0] == "2.8.0"; from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy; from transformers.models.llama.modeling_llama import LlamaRotaryEmbedding'
+ENV HOME=/tmp HF_HOME=/tmp/huggingface PYTHONPATH=/opt/training
+WORKDIR /opt/training
+USER 1001

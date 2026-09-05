@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: iris-dataset-uri
+  namespace: demo-llm
+  labels:
+    opendatahub.io/dashboard: "true"
+  annotations:
+    opendatahub.io/connection-type-protocol: "uri"
+    openshift.io/display-name: "Iris Dataset CSV"
+type: Opaque
+stringData:
+  URI: "https://raw.githubusercontent.com/mwaskom/seaborn-data/master/iris.csv"

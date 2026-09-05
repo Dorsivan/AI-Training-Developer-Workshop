@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: lb-test
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: web-test
+  namespace: lb-test
+  labels:
+    app: web-test
+spec:
+  containers:
+    - name: nginx
+      image: nginxinc/nginx-unprivileged:latest
+      ports:
+        - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-lb
+  namespace: lb-test
+spec:
+  type: LoadBalancer
+  selector:
+    app: web-test
+  ports:
+    - port: 80
+      targetPort: 8080

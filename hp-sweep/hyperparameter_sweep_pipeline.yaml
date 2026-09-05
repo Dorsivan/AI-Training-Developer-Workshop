@@ -1,0 +1,535 @@
+# PIPELINE DEFINITION
+# Name: random-forest-hyperparameter-sweep
+# Inputs:
+#    direction: str [Default: 'maximize']
+#    max_trials: int [Default: 12.0]
+#    search_space_json: str [Default: '{"max_depth": [4, 8, 16], "min_samples_split": [2, 5], "n_estimators": [50, 100, 200]}']
+#    seed: int [Default: 42.0]
+#    strategy: str [Default: 'grid']
+components:
+  comp-create-dataset:
+    executorLabel: exec-create-dataset
+    inputDefinitions:
+      parameters:
+        seed:
+          parameterType: NUMBER_INTEGER
+    outputDefinitions:
+      artifacts:
+        development:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        test:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-for-loop-1:
+    dag:
+      outputs:
+        parameters:
+          pipelinechannel--train-trial-Output:
+            valueFromParameter:
+              outputParameterKey: Output
+              producerSubtask: train-trial
+      tasks:
+        train-trial:
+          cachingOptions:
+            enableCache: true
+          componentRef:
+            name: comp-train-trial
+          inputs:
+            artifacts:
+              dataset:
+                componentInputArtifact: pipelinechannel--create-dataset-development
+            parameters:
+              seed:
+                componentInputParameter: pipelinechannel--seed
+              trial:
+                componentInputParameter: pipelinechannel--generate-trials-Output-loop-item
+          taskInfo:
+            name: train-trial
+    inputDefinitions:
+      artifacts:
+        pipelinechannel--create-dataset-development:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        pipelinechannel--generate-trials-Output:
+          parameterType: LIST
+        pipelinechannel--generate-trials-Output-loop-item:
+          parameterType: STRUCT
+        pipelinechannel--seed:
+          parameterType: NUMBER_INTEGER
+    outputDefinitions:
+      parameters:
+        pipelinechannel--train-trial-Output:
+          parameterType: LIST
+  comp-generate-trials:
+    executorLabel: exec-generate-trials
+    inputDefinitions:
+      parameters:
+        max_trials:
+          parameterType: NUMBER_INTEGER
+        search_space_json:
+          parameterType: STRING
+        seed:
+          parameterType: NUMBER_INTEGER
+        strategy:
+          parameterType: STRING
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: LIST
+  comp-select-best:
+    executorLabel: exec-select-best
+    inputDefinitions:
+      parameters:
+        direction:
+          parameterType: STRING
+        trial_results_json:
+          parameterType: LIST
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+  comp-train-final-model:
+    executorLabel: exec-train-final-model
+    inputDefinitions:
+      artifacts:
+        dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        test_dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        best_result_json:
+          parameterType: STRING
+        seed:
+          parameterType: NUMBER_INTEGER
+    outputDefinitions:
+      artifacts:
+        model:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+        report:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+      parameters:
+        Output:
+          parameterType: NUMBER_DOUBLE
+  comp-train-trial:
+    executorLabel: exec-train-trial
+    inputDefinitions:
+      artifacts:
+        dataset:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        seed:
+          parameterType: NUMBER_INTEGER
+        trial:
+          parameterType: STRUCT
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+deploymentSpec:
+  executors:
+    exec-create-dataset:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - create_dataset
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'joblib==1.4.2'\
+          \ 'pandas==2.2.3' 'scikit-learn==1.5.2'  &&  python3 -m pip install --quiet\
+          \ --no-warn-script-location 'kfp==2.17.0' '--no-deps' 'typing-extensions>=3.7.4,<5;\
+          \ python_version<\"3.9\"' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef create_dataset(\n    seed: int,\n    development: dsl.Output[dsl.Dataset],\n\
+          \    test: dsl.Output[dsl.Dataset],\n):\n    \"\"\"Reserve the final test\
+          \ set before any hyperparameter selection.\"\"\"\n    from sklearn.datasets\
+          \ import load_breast_cancer\n    from sklearn.model_selection import train_test_split\n\
+          \n    frame = load_breast_cancer(as_frame=True).frame\n    development_frame,\
+          \ test_frame = train_test_split(\n        frame, test_size=0.20, random_state=seed,\
+          \ stratify=frame[\"target\"]\n    )\n    for artifact, subset, role in [\n\
+          \        (development, development_frame, \"development\"),\n        (test,\
+          \ test_frame, \"held-out-test\"),\n    ]:\n        subset.to_csv(artifact.path,\
+          \ index=False)\n        artifact.metadata.update({\n            \"source\"\
+          : \"sklearn.datasets.load_breast_cancer\",\n            \"rows\": len(subset),\
+          \ \"split_seed\": seed, \"role\": role,\n            \"row_ids\": [int(i)\
+          \ for i in subset.index],\n        })\n\n"
+        image: python:3.11-slim
+    exec-generate-trials:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - generate_trials
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef generate_trials(\n    search_space_json: str,\n    strategy:\
+          \ str,\n    max_trials: int,\n    seed: int,\n) -> List[Dict]:\n    \"\"\
+          \"Expands a JSON search space into a fixed list of trial dictionaries.\"\
+          \"\"\n    import json\n    import math\n    import random\n    import sys\n\
+          \n    search_space = json.loads(search_space_json)\n    required = {\"n_estimators\"\
+          , \"max_depth\", \"min_samples_split\"}\n    if not isinstance(search_space,\
+          \ dict) or set(search_space) != required:\n        raise ValueError(f\"\
+          Expected exactly these search keys: {sorted(required)}\")\n    names = sorted(search_space)\n\
+          \    values = []\n    for name in names:\n        candidates = search_space[name]\n\
+          \        if not isinstance(candidates, list) or not candidates:\n      \
+          \      raise ValueError(f\"{name} must be a non-empty list\")\n        lower\
+          \ = 2 if name == \"min_samples_split\" else 1\n        if any(type(v) is\
+          \ not int or v < lower for v in candidates):\n            raise ValueError(f\"\
+          {name} candidates must be integers >= {lower}\")\n        if len(set(candidates))\
+          \ != len(candidates):\n            raise ValueError(f\"{name} contains duplicate\
+          \ candidates\")\n        values.append(candidates)\n\n    total = math.prod(len(v)\
+          \ for v in values)\n    output_cap = 512\n    if strategy == \"grid\":\n\
+          \        if total > output_cap:\n            raise ValueError(f\"Grid has\
+          \ {total} trials; limit is {output_cap}\")\n        indices = range(total)\n\
+          \    elif strategy == \"random\":\n        if max_trials <= 0 or max_trials\
+          \ > output_cap:\n            raise ValueError(f\"max_trials must be in 1..{output_cap}\"\
+          )\n        if total > sys.maxsize:\n            raise ValueError(\"Search\
+          \ space exceeds supported index range\")\n        indices = random.Random(seed).sample(range(total),\
+          \ min(max_trials, total))\n    else:\n        raise ValueError(\"strategy\
+          \ must be 'grid' or 'random'\")\n\n    selected = []\n    for index in indices:\n\
+          \        trial = {}\n        for name, candidates in reversed(list(zip(names,\
+          \ values))):\n            index, offset = divmod(index, len(candidates))\n\
+          \            trial[name] = candidates[offset]\n        selected.append(trial)\n\
+          \    if len(json.dumps(selected).encode(\"utf-8\")) > 128 * 1024:\n    \
+          \    raise ValueError(\"Trial list exceeds this guide's 128 KiB output budget\"\
+          )\n    print(f\"Generated {len(selected)} of {total} possible trial configurations\"\
+          )\n    return selected\n\n"
+        image: python:3.11-slim
+    exec-select-best:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - select_best
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef select_best(\n    trial_results_json: List[str],\n    direction:\
+          \ str,\n) -> str:\n    \"\"\"Selects the best valid result returned by the\
+          \ parallel trials.\"\"\"\n    import json\n    import math\n\n    if direction\
+          \ not in {\"maximize\", \"minimize\"}:\n        raise ValueError(\"direction\
+          \ must be 'maximize' or 'minimize'\")\n\n    valid_results = []\n    for\
+          \ raw_result in trial_results_json:\n        result = json.loads(raw_result)\n\
+          \        metric = float(result[\"metric_value\"])\n        if not math.isfinite(metric):\n\
+          \            raise ValueError(\"Trial metric must be finite\")\n       \
+          \ if result.get(\"metric_name\") != \"accuracy\":\n            raise ValueError(\"\
+          All trials must report accuracy\")\n        if not isinstance(result.get(\"\
+          parameters\"), dict) or not result.get(\"trial_id\"):\n            raise\
+          \ ValueError(\"Missing trial parameters or ID\")\n        result[\"metric_value\"\
+          ] = metric\n        valid_results.append(result)\n\n    if not valid_results:\n\
+          \        raise RuntimeError(\"No successful trial produced a finite metric\"\
+          )\n\n    best = (\n        max(valid_results, key=lambda item: (item[\"\
+          metric_value\"], item[\"trial_id\"]))\n        if direction == \"maximize\"\
+          \n        else min(valid_results, key=lambda item: (item[\"metric_value\"\
+          ], item[\"trial_id\"]))\n    )\n\n    best[\"completed_trial_count\"] =\
+          \ len(valid_results)\n    best_json = json.dumps(best, sort_keys=True)\n\
+          \    print(f\"Best trial: {best_json}\")\n    return best_json\n\n"
+        image: python:3.11-slim
+    exec-train-final-model:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - train_final_model
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'joblib==1.4.2'\
+          \ 'pandas==2.2.3' 'scikit-learn==1.5.2'  &&  python3 -m pip install --quiet\
+          \ --no-warn-script-location 'kfp==2.17.0' '--no-deps' 'typing-extensions>=3.7.4,<5;\
+          \ python_version<\"3.9\"' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef train_final_model(\n    dataset: dsl.Input[dsl.Dataset],\n  \
+          \  test_dataset: dsl.Input[dsl.Dataset],\n    best_result_json: str,\n \
+          \   seed: int,\n    model: dsl.Output[dsl.Model],\n    report: dsl.Output[dsl.Artifact],\n\
+          ) -> float:\n    \"\"\"Retrains a final model with the selected hyperparameters.\"\
+          \"\"\n    import json\n\n    import joblib\n    import pandas as pd\n  \
+          \  from sklearn.ensemble import RandomForestClassifier\n    from sklearn.metrics\
+          \ import accuracy_score\n    from sklearn.model_selection import train_test_split\n\
+          \n    best_result = json.loads(best_result_json)\n    parameters = best_result[\"\
+          parameters\"]\n\n    frame = pd.read_csv(dataset.path)\n    features = frame.drop(columns=[\"\
+          target\"])\n    target = frame[\"target\"]\n\n    test_frame = pd.read_csv(test_dataset.path)\n\
+          \    x_train, y_train = features, target\n    x_test = test_frame.drop(columns=[\"\
+          target\"])\n    y_test = test_frame[\"target\"]\n\n    final_model = RandomForestClassifier(\n\
+          \        n_estimators=int(parameters[\"n_estimators\"]),\n        max_depth=int(parameters[\"\
+          max_depth\"]),\n        min_samples_split=int(parameters[\"min_samples_split\"\
+          ]),\n        random_state=seed,\n        n_jobs=1,\n    )\n    final_model.fit(x_train,\
+          \ y_train)\n\n    test_accuracy = float(accuracy_score(y_test, final_model.predict(x_test)))\n\
+          \    joblib.dump(final_model, model.path)\n\n    final_report = {\n    \
+          \    \"selected_trial\": best_result,\n        \"test_accuracy\": test_accuracy,\n\
+          \    }\n    with open(report.path, \"w\", encoding=\"utf-8\") as report_file:\n\
+          \        json.dump(final_report, report_file, indent=2, sort_keys=True)\n\
+          \n    model.metadata[\"framework\"] = \"scikit-learn\"\n    model.metadata[\"\
+          algorithm\"] = \"RandomForestClassifier\"\n    model.metadata[\"test_accuracy\"\
+          ] = test_accuracy\n    model.metadata[\"hyperparameters\"] = parameters\n\
+          \    report.metadata[\"test_accuracy\"] = test_accuracy\n\n    print(json.dumps(final_report,\
+          \ indent=2, sort_keys=True))\n    return test_accuracy\n\n"
+        image: python:3.11-slim
+        resources:
+          cpuRequest: 2.0
+          memoryRequest: 2.147483648
+          resourceCpuRequest: '2'
+          resourceMemoryRequest: 2Gi
+    exec-train-trial:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - train_trial
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'joblib==1.4.2'\
+          \ 'pandas==2.2.3' 'scikit-learn==1.5.2'  &&  python3 -m pip install --quiet\
+          \ --no-warn-script-location 'kfp==2.17.0' '--no-deps' 'typing-extensions>=3.7.4,<5;\
+          \ python_version<\"3.9\"' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef train_trial(\n    dataset: dsl.Input[dsl.Dataset],\n    trial:\
+          \ Dict,\n    seed: int,\n) -> str:\n    \"\"\"Trains one trial and returns\
+          \ a compact JSON result parameter.\"\"\"\n    import hashlib\n    import\
+          \ json\n    import math\n\n    import pandas as pd\n    from sklearn.ensemble\
+          \ import RandomForestClassifier\n    from sklearn.metrics import accuracy_score\n\
+          \    from sklearn.model_selection import train_test_split\n\n    frame =\
+          \ pd.read_csv(dataset.path)\n    features = frame.drop(columns=[\"target\"\
+          ])\n    target = frame[\"target\"]\n\n    x_train, x_valid, y_train, y_valid\
+          \ = train_test_split(\n        features,\n        target,\n        test_size=0.25,\n\
+          \        random_state=seed,\n        stratify=target,\n    )\n\n    parameters\
+          \ = {\n        \"n_estimators\": int(trial[\"n_estimators\"]),\n       \
+          \ \"max_depth\": int(trial[\"max_depth\"]),\n        \"min_samples_split\"\
+          : int(trial[\"min_samples_split\"]),\n    }\n\n    model = RandomForestClassifier(\n\
+          \        **parameters,\n        random_state=seed,\n        n_jobs=1,\n\
+          \    )\n    model.fit(x_train, y_train)\n    predictions = model.predict(x_valid)\n\
+          \    metric_value = float(accuracy_score(y_valid, predictions))\n\n    if\
+          \ not math.isfinite(metric_value):\n        raise ValueError(f\"Trial produced\
+          \ a non-finite metric: {metric_value}\")\n\n    canonical_parameters = json.dumps(parameters,\
+          \ sort_keys=True)\n    trial_id = hashlib.sha256((canonical_parameters +\
+          \ \":\" + str(seed)).encode(\"utf-8\")).hexdigest()[:12]\n\n    result =\
+          \ {\n        \"trial_id\": trial_id,\n        \"metric_name\": \"accuracy\"\
+          ,\n        \"metric_value\": metric_value,\n        \"parameters\": parameters,\n\
+          \        \"seed\": seed,\n    }\n\n    result_json = json.dumps(result,\
+          \ sort_keys=True)\n    print(result_json)\n    return result_json\n\n"
+        image: python:3.11-slim
+        resources:
+          cpuRequest: 1.0
+          memoryRequest: 1.073741824
+          resourceCpuRequest: '1'
+          resourceMemoryRequest: 1Gi
+pipelineInfo:
+  name: random-forest-hyperparameter-sweep
+root:
+  dag:
+    tasks:
+      create-dataset:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-create-dataset
+        inputs:
+          parameters:
+            seed:
+              componentInputParameter: seed
+        taskInfo:
+          name: create-dataset
+      for-loop-1:
+        componentRef:
+          name: comp-for-loop-1
+        dependentTasks:
+        - create-dataset
+        - generate-trials
+        inputs:
+          artifacts:
+            pipelinechannel--create-dataset-development:
+              taskOutputArtifact:
+                outputArtifactKey: development
+                producerTask: create-dataset
+          parameters:
+            pipelinechannel--generate-trials-Output:
+              taskOutputParameter:
+                outputParameterKey: Output
+                producerTask: generate-trials
+            pipelinechannel--seed:
+              componentInputParameter: seed
+        iteratorPolicy:
+          parallelismLimit: 4
+        parameterIterator:
+          itemInput: pipelinechannel--generate-trials-Output-loop-item
+          items:
+            inputParameter: pipelinechannel--generate-trials-Output
+        taskInfo:
+          name: hyperparameter-trials
+      generate-trials:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-generate-trials
+        inputs:
+          parameters:
+            max_trials:
+              componentInputParameter: max_trials
+            search_space_json:
+              componentInputParameter: search_space_json
+            seed:
+              componentInputParameter: seed
+            strategy:
+              componentInputParameter: strategy
+        taskInfo:
+          name: generate-trials
+      select-best:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-select-best
+        dependentTasks:
+        - for-loop-1
+        inputs:
+          parameters:
+            direction:
+              componentInputParameter: direction
+            trial_results_json:
+              taskOutputParameter:
+                outputParameterKey: pipelinechannel--train-trial-Output
+                producerTask: for-loop-1
+        taskInfo:
+          name: select-best
+      train-final-model:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-train-final-model
+        dependentTasks:
+        - create-dataset
+        - select-best
+        inputs:
+          artifacts:
+            dataset:
+              taskOutputArtifact:
+                outputArtifactKey: development
+                producerTask: create-dataset
+            test_dataset:
+              taskOutputArtifact:
+                outputArtifactKey: test
+                producerTask: create-dataset
+          parameters:
+            best_result_json:
+              taskOutputParameter:
+                outputParameterKey: Output
+                producerTask: select-best
+            seed:
+              componentInputParameter: seed
+        taskInfo:
+          name: train-final-model
+  inputDefinitions:
+    parameters:
+      direction:
+        defaultValue: maximize
+        isOptional: true
+        parameterType: STRING
+      max_trials:
+        defaultValue: 12.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      search_space_json:
+        defaultValue: '{"max_depth": [4, 8, 16], "min_samples_split": [2, 5], "n_estimators":
+          [50, 100, 200]}'
+        isOptional: true
+        parameterType: STRING
+      seed:
+        defaultValue: 42.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      strategy:
+        defaultValue: grid
+        isOptional: true
+        parameterType: STRING
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.17.0

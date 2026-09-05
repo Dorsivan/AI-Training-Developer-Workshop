@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vault-apikey-uri
+  namespace: demo-llm
+  labels:
+    opendatahub.io/dashboard: "true"
+  annotations:
+    opendatahub.io/connection-type-protocol: "uri"
+    opendatahub.io/connection-type-ref: "uri-v1"
+    openshift.io/display-name: "Vault API Key Endpoint"
+type: Opaque
+stringData:
+  URI: "https://vault-vault.apps.ocp.lgvzs.sandbox180.opentlc.com/v1/secret/data/apikey"

@@ -1,0 +1,26 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: inject-pipeline-priority-class
+  annotations:
+    policies.kyverno.io/title: Inject priorityClassName from Kueue label
+    policies.kyverno.io/description: >-
+      Copies the kueue.x-k8s.io/priority-class label value into
+      spec.priorityClassName so that Kubernetes scheduler-level
+      preemption aligns with Kueue admission-level preemption.
+spec:
+  rules:
+    - name: set-priority-class-name
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              selector:
+                matchExpressions:
+                  - key: kueue.x-k8s.io/priority-class
+                    operator: Exists
+      mutate:
+        patchStrategicMerge:
+          spec:
+            priorityClassName: "{{request.object.metadata.labels.\"kueue.x-k8s.io/priority-class\"}}"

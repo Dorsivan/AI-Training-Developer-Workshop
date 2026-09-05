@@ -1,0 +1,85 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nfs-server
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nfs-sa
+  namespace: nfs-server
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nfs-data
+  namespace: nfs-server
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nfs-ganesha
+  namespace: nfs-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nfs-ganesha
+  template:
+    metadata:
+      labels:
+        app: nfs-ganesha
+    spec:
+      serviceAccountName: nfs-sa
+      containers:
+        - name: nfs-ganesha
+          image: docker.io/janeczku/nfs-ganesha:latest
+          ports:
+            - containerPort: 2049
+              name: nfs
+            - containerPort: 20048
+              name: mountd
+          securityContext:
+            capabilities:
+              add:
+                - SYS_ADMIN
+                - DAC_READ_SEARCH
+          volumeMounts:
+            - name: data
+              mountPath: /data/nfs
+          readinessProbe:
+            tcpSocket:
+              port: 2049
+            initialDelaySeconds: 10
+            periodSeconds: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: nfs-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nfs-lb
+  namespace: nfs-server
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+spec:
+  type: LoadBalancer
+  selector:
+    app: nfs-ganesha
+  ports:
+    - name: nfs
+      port: 2049
+      targetPort: 2049
+      protocol: TCP
+    - name: mountd
+      port: 20048
+      targetPort: 20048
+      protocol: TCP

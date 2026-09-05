@@ -1,0 +1,67 @@
+apiVersion: trainer.kubeflow.org/v1alpha1
+kind: TrainJob
+metadata:
+  name: fsdp-resume
+  namespace: distributed-training
+spec:
+  runtimeRef:
+    name: torch-distributed
+    kind: ClusterTrainingRuntime
+  trainer:
+    image: REPLACE_WITH_REGISTRY/ml/fsdp-training:v1
+    command: [torchrun, /opt/training/train_fsdp.py]
+    numNodes: 2
+    numProcPerNode: 1
+    resourcesPerNode:
+      requests:
+        cpu: "4"
+        memory: 16Gi
+        nvidia.com/gpu: "1"
+      limits:
+        cpu: "4"
+        memory: 16Gi
+        nvidia.com/gpu: "1"
+    env:
+      - name: STEPS
+        value: "80"
+      - name: SEQ_LEN
+        value: "128"
+      - name: SAVE_EVERY
+        value: "20"
+      - name: CHECKPOINT_DIR
+        value: /shared/checkpoints/smoke-002
+      - name: RESUME_FROM
+        value: /shared/checkpoints/smoke-001/step-000040
+      - name: NCCL_DEBUG
+        value: INFO
+      - name: OMP_NUM_THREADS
+        value: "1"
+  podTemplateOverrides:
+    - targetJobs:
+        - name: node
+      metadata:
+        labels:
+          training.example.com/job: fsdp-resume
+      spec:
+        affinity:
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              - labelSelector:
+                  matchLabels:
+                    training.example.com/job: fsdp-resume
+                topologyKey: kubernetes.io/hostname
+        volumes:
+          - name: shared
+            persistentVolumeClaim:
+              claimName: training-shared
+          - name: shm
+            emptyDir:
+              medium: Memory
+              sizeLimit: 2Gi
+        containers:
+          - name: node
+            volumeMounts:
+              - name: shared
+                mountPath: /shared
+              - name: shm
+                mountPath: /dev/shm

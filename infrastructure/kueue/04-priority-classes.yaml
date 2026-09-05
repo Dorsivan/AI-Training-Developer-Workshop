@@ -1,0 +1,23 @@
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: pipeline-low-priority
+value: 100
+globalDefault: false
+description: "Low priority pipeline workloads — can be preempted by the scheduler"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: pipeline-default-priority
+value: 1000
+globalDefault: false
+description: "Default priority for pipeline workloads"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: pipeline-high-priority
+value: 10000
+globalDefault: false
+description: "High priority pipeline workloads — scheduler will preempt lower priorities"

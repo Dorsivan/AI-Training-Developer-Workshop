@@ -1,0 +1,4 @@
+transformers==4.55.4
+accelerate==1.10.1
+safetensors==0.6.2
+numpy==2.2.6

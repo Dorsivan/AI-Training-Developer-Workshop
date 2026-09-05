@@ -1,0 +1,8 @@
+FROM registry.access.redhat.com/ubi9/python-311:latest
+USER 0
+COPY requirements-training.txt /tmp/requirements-training.txt
+RUN python -m pip install --no-cache-dir -r /tmp/requirements-training.txt
+RUN mkdir -p /opt/app && chgrp -R 0 /opt/app && chmod -R g=u /opt/app
+ENV HOME=/tmp
+WORKDIR /opt/app
+USER 1001

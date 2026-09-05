@@ -1,0 +1,581 @@
+# PIPELINE DEFINITION
+# Name: iris-classifier-training-pipeline
+# Description: Fetch an API key from Vault, fetch data from a URI connection, train, evaluate, and conditionally export an Iris classifier on OpenShift AI.
+# Inputs:
+#    accuracy_threshold: float [Default: 0.9]
+#    data_uri: str [Default: 'https://raw.githubusercontent.com/mwaskom/seaborn-data/master/iris.csv']
+#    label_column: str [Default: 'species']
+#    max_depth: int [Default: 5.0]
+#    n_estimators: int [Default: 100.0]
+#    test_size: float [Default: 0.2]
+#    vault_token: str [Default: '']
+#    vault_uri: str [Default: 'https://vault-vault.apps.ocp.lgvzs.sandbox180.opentlc.com/v1/secret/data/apikey']
+components:
+  comp-condition-1:
+    dag:
+      tasks:
+        export-model:
+          cachingOptions:
+            enableCache: true
+          componentRef:
+            name: comp-export-model
+          inputs:
+            artifacts:
+              model_path:
+                componentInputArtifact: pipelinechannel--train-model-model_path
+            parameters:
+              accuracy:
+                componentInputParameter: pipelinechannel--evaluate-model-Output
+          taskInfo:
+            name: export-model
+    inputDefinitions:
+      artifacts:
+        pipelinechannel--train-model-model_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+      parameters:
+        pipelinechannel--accuracy_threshold:
+          parameterType: NUMBER_DOUBLE
+        pipelinechannel--evaluate-model-Output:
+          parameterType: NUMBER_DOUBLE
+  comp-evaluate-model:
+    executorLabel: exec-evaluate-model
+    inputDefinitions:
+      artifacts:
+        model_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+        test_features_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+        test_labels_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      artifacts:
+        metrics_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+      parameters:
+        Output:
+          parameterType: NUMBER_DOUBLE
+  comp-export-model:
+    executorLabel: exec-export-model
+    inputDefinitions:
+      artifacts:
+        model_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+      parameters:
+        accuracy:
+          parameterType: NUMBER_DOUBLE
+    outputDefinitions:
+      artifacts:
+        exported_model_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+  comp-fetch-data-from-uri:
+    executorLabel: exec-fetch-data-from-uri
+    inputDefinitions:
+      parameters:
+        data_uri:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        raw_data_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+  comp-fetch-secret-from-vault:
+    executorLabel: exec-fetch-secret-from-vault
+    inputDefinitions:
+      parameters:
+        secret_key:
+          defaultValue: key
+          isOptional: true
+          parameterType: STRING
+        vault_token:
+          parameterType: STRING
+        vault_uri:
+          parameterType: STRING
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+  comp-preprocess-data:
+    executorLabel: exec-preprocess-data
+    inputDefinitions:
+      artifacts:
+        raw_data_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+      parameters:
+        label_column:
+          defaultValue: species
+          isOptional: true
+          parameterType: STRING
+        random_state:
+          defaultValue: 42.0
+          isOptional: true
+          parameterType: NUMBER_INTEGER
+        test_size:
+          defaultValue: 0.2
+          isOptional: true
+          parameterType: NUMBER_DOUBLE
+    outputDefinitions:
+      artifacts:
+        test_features_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+        test_labels_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+        train_features_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+        train_labels_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+  comp-train-model:
+    executorLabel: exec-train-model
+    inputDefinitions:
+      artifacts:
+        train_features_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+        train_labels_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+      parameters:
+        max_depth:
+          defaultValue: 5.0
+          isOptional: true
+          parameterType: NUMBER_INTEGER
+        n_estimators:
+          defaultValue: 100.0
+          isOptional: true
+          parameterType: NUMBER_INTEGER
+        random_state:
+          defaultValue: 42.0
+          isOptional: true
+          parameterType: NUMBER_INTEGER
+    outputDefinitions:
+      artifacts:
+        model_path:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+deploymentSpec:
+  executors:
+    exec-evaluate-model:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - evaluate_model
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.12.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'scikit-learn==1.5.2'\
+          \ 'pandas==2.2.3' 'joblib==1.4.2' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef evaluate_model(\n    model_path: dsl.InputPath(\"joblib\"),\n\
+          \    test_features_path: dsl.InputPath(\"csv\"),\n    test_labels_path:\
+          \ dsl.InputPath(\"csv\"),\n    metrics_path: dsl.OutputPath(\"json\"),\n\
+          ) -> float:\n    \"\"\"Evaluate the trained model and return accuracy.\"\
+          \"\"\n    import json\n\n    import joblib\n    import pandas as pd\n  \
+          \  from sklearn.metrics import (\n        accuracy_score,\n        classification_report,\n\
+          \        f1_score,\n    )\n\n    model = joblib.load(model_path)\n    X_test\
+          \ = pd.read_csv(test_features_path)\n    y_test = pd.read_csv(test_labels_path).squeeze()\n\
+          \n    y_pred = model.predict(X_test)\n    accuracy = accuracy_score(y_test,\
+          \ y_pred)\n    f1 = f1_score(y_test, y_pred, average=\"weighted\")\n   \
+          \ report = classification_report(y_test, y_pred, output_dict=True)\n\n \
+          \   metrics = {\n        \"accuracy\": float(accuracy),\n        \"f1_weighted\"\
+          : float(f1),\n        \"classification_report\": report,\n    }\n\n    with\
+          \ open(metrics_path, \"w\") as f:\n        json.dump(metrics, f, indent=2)\n\
+          \n    print(f\"Accuracy: {accuracy:.4f}, F1 (weighted): {f1:.4f}\")\n  \
+          \  return accuracy\n\n"
+        image: registry.redhat.io/ubi9/python-311:latest
+    exec-export-model:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - export_model
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.12.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'joblib==1.4.2'\
+          \ && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef export_model(\n    model_path: dsl.InputPath(\"joblib\"),\n \
+          \   exported_model_path: dsl.OutputPath(\"joblib\"),\n    accuracy: float,\n\
+          ):\n    \"\"\"Copy the model to the export path for downstream serving.\"\
+          \"\"\n    import shutil\n\n    shutil.copy2(model_path, exported_model_path)\n\
+          \    print(f\"Model exported (accuracy={accuracy:.4f}), ready for serving.\"\
+          )\n\n"
+        image: registry.redhat.io/ubi9/python-311:latest
+    exec-fetch-data-from-uri:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - fetch_data_from_uri
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.12.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef fetch_data_from_uri(\n    data_uri: str,\n    raw_data_path:\
+          \ dsl.OutputPath(\"csv\"),\n):\n    \"\"\"Download a CSV dataset from a\
+          \ URI (HTTP/HTTPS).\"\"\"\n    import urllib.request\n\n    print(f\"Fetching\
+          \ data from: {data_uri}\")\n    urllib.request.urlretrieve(data_uri, raw_data_path)\n\
+          \n    with open(raw_data_path) as f:\n        line_count = sum(1 for _ in\
+          \ f) - 1\n    print(f\"Downloaded {line_count} rows\")\n\n"
+        image: registry.redhat.io/ubi9/python-311:latest
+    exec-fetch-secret-from-vault:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - fetch_secret_from_vault
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.12.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef fetch_secret_from_vault(\n    vault_uri: str,\n    vault_token:\
+          \ str,\n    secret_key: str = \"key\",\n) -> str:\n    \"\"\"Fetch a secret\
+          \ value from HashiCorp Vault via its KV v2 API.\"\"\"\n    import json\n\
+          \    import ssl\n    import urllib.request\n\n    ctx = ssl.create_default_context()\n\
+          \    ctx.check_hostname = False\n    ctx.verify_mode = ssl.CERT_NONE\n\n\
+          \    req = urllib.request.Request(vault_uri)\n    req.add_header(\"X-Vault-Token\"\
+          , vault_token)\n\n    with urllib.request.urlopen(req, context=ctx) as resp:\n\
+          \        body = json.loads(resp.read())\n\n    value = body[\"data\"][\"\
+          data\"][secret_key]\n    masked = value[:4] + \"****\" + value[-4:]\n  \
+          \  print(f\"Retrieved secret '{secret_key}' from Vault: {masked}\")\n  \
+          \  return value\n\n"
+        image: registry.redhat.io/ubi9/python-311:latest
+    exec-preprocess-data:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - preprocess_data
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.12.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'scikit-learn==1.5.2'\
+          \ 'pandas==2.2.3' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef preprocess_data(\n    raw_data_path: dsl.InputPath(\"csv\"),\n\
+          \    train_features_path: dsl.OutputPath(\"csv\"),\n    test_features_path:\
+          \ dsl.OutputPath(\"csv\"),\n    train_labels_path: dsl.OutputPath(\"csv\"\
+          ),\n    test_labels_path: dsl.OutputPath(\"csv\"),\n    label_column: str\
+          \ = \"species\",\n    test_size: float = 0.2,\n    random_state: int = 42,\n\
+          ):\n    \"\"\"Preprocess a raw CSV: encode labels, scale features, split\
+          \ train/test.\"\"\"\n    import pandas as pd\n    from sklearn.model_selection\
+          \ import train_test_split\n    from sklearn.preprocessing import LabelEncoder,\
+          \ StandardScaler\n\n    df = pd.read_csv(raw_data_path)\n    print(f\"Loaded\
+          \ {len(df)} rows, columns: {list(df.columns)}\")\n\n    le = LabelEncoder()\n\
+          \    y = pd.Series(le.fit_transform(df[label_column]), name=\"target\")\n\
+          \    X = df.drop(columns=[label_column])\n\n    print(f\"Classes: {list(le.classes_)}\"\
+          )\n\n    X_train, X_test, y_train, y_test = train_test_split(\n        X,\
+          \ y, test_size=test_size, random_state=random_state, stratify=y\n    )\n\
+          \n    scaler = StandardScaler()\n    X_train_scaled = pd.DataFrame(\n  \
+          \      scaler.fit_transform(X_train), columns=X_train.columns\n    )\n \
+          \   X_test_scaled = pd.DataFrame(\n        scaler.transform(X_test), columns=X_test.columns\n\
+          \    )\n\n    X_train_scaled.to_csv(train_features_path, index=False)\n\
+          \    X_test_scaled.to_csv(test_features_path, index=False)\n    y_train.to_csv(train_labels_path,\
+          \ index=False)\n    y_test.to_csv(test_labels_path, index=False)\n\n   \
+          \ print(f\"Train: {len(X_train_scaled)}, Test: {len(X_test_scaled)}\")\n\
+          \n"
+        image: registry.redhat.io/ubi9/python-311:latest
+    exec-train-model:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - train_model
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.12.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'scikit-learn==1.5.2'\
+          \ 'pandas==2.2.3' 'joblib==1.4.2' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef train_model(\n    train_features_path: dsl.InputPath(\"csv\"\
+          ),\n    train_labels_path: dsl.InputPath(\"csv\"),\n    model_path: dsl.OutputPath(\"\
+          joblib\"),\n    n_estimators: int = 100,\n    max_depth: int = 5,\n    random_state:\
+          \ int = 42,\n):\n    \"\"\"Train a RandomForest classifier on the training\
+          \ data.\"\"\"\n    import joblib\n    import pandas as pd\n    from sklearn.ensemble\
+          \ import RandomForestClassifier\n\n    X_train = pd.read_csv(train_features_path)\n\
+          \    y_train = pd.read_csv(train_labels_path).squeeze()\n\n    model = RandomForestClassifier(\n\
+          \        n_estimators=n_estimators,\n        max_depth=max_depth,\n    \
+          \    random_state=random_state,\n    )\n    model.fit(X_train, y_train)\n\
+          \n    joblib.dump(model, model_path)\n    print(f\"Model trained with {n_estimators}\
+          \ estimators, max_depth={max_depth}\")\n\n"
+        image: registry.redhat.io/ubi9/python-311:latest
+pipelineInfo:
+  description: Fetch an API key from Vault, fetch data from a URI connection, train,
+    evaluate, and conditionally export an Iris classifier on OpenShift AI.
+  name: iris-classifier-training-pipeline
+root:
+  dag:
+    tasks:
+      condition-1:
+        componentRef:
+          name: comp-condition-1
+        dependentTasks:
+        - evaluate-model
+        - train-model
+        inputs:
+          artifacts:
+            pipelinechannel--train-model-model_path:
+              taskOutputArtifact:
+                outputArtifactKey: model_path
+                producerTask: train-model
+          parameters:
+            pipelinechannel--accuracy_threshold:
+              componentInputParameter: accuracy_threshold
+            pipelinechannel--evaluate-model-Output:
+              taskOutputParameter:
+                outputParameterKey: Output
+                producerTask: evaluate-model
+        taskInfo:
+          name: condition-1
+        triggerPolicy:
+          condition: inputs.parameter_values['pipelinechannel--evaluate-model-Output']
+            >= inputs.parameter_values['pipelinechannel--accuracy_threshold']
+      evaluate-model:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-evaluate-model
+        dependentTasks:
+        - preprocess-data
+        - train-model
+        inputs:
+          artifacts:
+            model_path:
+              taskOutputArtifact:
+                outputArtifactKey: model_path
+                producerTask: train-model
+            test_features_path:
+              taskOutputArtifact:
+                outputArtifactKey: test_features_path
+                producerTask: preprocess-data
+            test_labels_path:
+              taskOutputArtifact:
+                outputArtifactKey: test_labels_path
+                producerTask: preprocess-data
+        taskInfo:
+          name: evaluate-model
+      fetch-data-from-uri:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-fetch-data-from-uri
+        inputs:
+          parameters:
+            data_uri:
+              componentInputParameter: data_uri
+        taskInfo:
+          name: fetch-data-from-uri
+      fetch-secret-from-vault:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-fetch-secret-from-vault
+        inputs:
+          parameters:
+            vault_token:
+              componentInputParameter: vault_token
+            vault_uri:
+              componentInputParameter: vault_uri
+        taskInfo:
+          name: fetch-secret-from-vault
+      preprocess-data:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-preprocess-data
+        dependentTasks:
+        - fetch-data-from-uri
+        - fetch-secret-from-vault
+        inputs:
+          artifacts:
+            raw_data_path:
+              taskOutputArtifact:
+                outputArtifactKey: raw_data_path
+                producerTask: fetch-data-from-uri
+          parameters:
+            label_column:
+              componentInputParameter: label_column
+            test_size:
+              componentInputParameter: test_size
+        taskInfo:
+          name: preprocess-data
+      train-model:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-train-model
+        dependentTasks:
+        - preprocess-data
+        inputs:
+          artifacts:
+            train_features_path:
+              taskOutputArtifact:
+                outputArtifactKey: train_features_path
+                producerTask: preprocess-data
+            train_labels_path:
+              taskOutputArtifact:
+                outputArtifactKey: train_labels_path
+                producerTask: preprocess-data
+          parameters:
+            max_depth:
+              componentInputParameter: max_depth
+            n_estimators:
+              componentInputParameter: n_estimators
+        taskInfo:
+          name: train-model
+  inputDefinitions:
+    parameters:
+      accuracy_threshold:
+        defaultValue: 0.9
+        isOptional: true
+        parameterType: NUMBER_DOUBLE
+      data_uri:
+        defaultValue: https://raw.githubusercontent.com/mwaskom/seaborn-data/master/iris.csv
+        isOptional: true
+        parameterType: STRING
+      label_column:
+        defaultValue: species
+        isOptional: true
+        parameterType: STRING
+      max_depth:
+        defaultValue: 5.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      n_estimators:
+        defaultValue: 100.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      test_size:
+        defaultValue: 0.2
+        isOptional: true
+        parameterType: NUMBER_DOUBLE
+      vault_token:
+        defaultValue: ''
+        isOptional: true
+        parameterType: STRING
+      vault_uri:
+        defaultValue: https://vault-vault.apps.ocp.lgvzs.sandbox180.opentlc.com/v1/secret/data/apikey
+        isOptional: true
+        parameterType: STRING
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.12.1

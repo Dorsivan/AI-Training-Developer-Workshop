@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-config
+  namespace: vault
+  labels:
+    app: vault
+data:
+  vault-config.hcl: |
+    ui = true
+
+    listener "tcp" {
+      address     = "0.0.0.0:8200"
+      tls_disable = 1
+    }
+
+    storage "file" {
+      path = "/home/vault/data"
+    }
+
+    disable_mlock = true
+
+    api_addr = "http://0.0.0.0:8200"
