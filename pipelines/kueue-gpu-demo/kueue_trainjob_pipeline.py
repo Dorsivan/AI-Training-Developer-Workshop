@@ -1,7 +1,7 @@
 """
-KFP + Kueue GPU Demo — PyTorchJob Pattern.
+KFP + Kueue GPU Demo — TrainJob Pattern.
 
-The GPU training step launches a Kueue-managed PyTorchJob instead of
+The GPU training step launches a Kueue-managed TrainJob instead of
 requesting GPUs directly on the Argo pod.  This gives Kueue native
 suspend/unsuspend lifecycle over the training workload:
 
@@ -9,25 +9,25 @@ suspend/unsuspend lifecycle over the training workload:
        │
        │  creates + watches
        ▼
-  PyTorchJob (kubeflow.org/v1)  ←  Kueue manages this
+  TrainJob (trainer.kubeflow.org/v1alpha1)  ←  Kueue manages this
        │
        ▼
   GPU pod (suspend / preempt / re-admit)
        │
        ▼
-  PyTorchJob completes  →  KFP component succeeds  →  next step
+  TrainJob completes  →  KFP component succeeds  →  next step
 
-Kueue preemption suspends the PyTorchJob (not the Argo pod), so the
+Kueue preemption suspends the TrainJob (not the Argo pod), so the
 KFP pipeline node stays Running throughout.  No Argo retry needed.
 
 Demo scenario (2 physical GPUs):
   1. Submit 2 runs to team-a  →  1 own + 1 borrowed GPU
   2. Submit 1 run to team-b  →  Kueue preempts team-a's borrowed
-     PyTorchJob via reclaimWithinCohort, then re-admits when GPU frees up
+     TrainJob via reclaimWithinCohort, then re-admits when GPU frees up
 
 Requires:
-  - Kubeflow Training Operator (PyTorchJob CRD)
-  - Kueue with PyTorchJob integration enabled
+  - Kubeflow Training Operator v2 (TrainJob CRD: trainer.kubeflow.org)
+  - Kueue with trainer.kubeflow.org/trainjob in frameworks
 
 Compile:
     python kueue_trainjob_pipeline.py
@@ -65,16 +65,16 @@ def run_training_job(
     data_status: str,
     kueue_queue: str,
     train_duration: int = 300,
-    num_workers: int = 0,
-    gpus_per_replica: int = 1,
+    num_nodes: int = 1,
+    gpus_per_node: int = 1,
     poll_interval: int = 10,
 ) -> str:
-    """Launch a Kueue-managed PyTorchJob and wait for it to complete.
+    """Launch a Kueue-managed TrainJob and wait for it to complete.
 
     This component does NOT request GPUs itself.  It creates a
-    kubeflow.org/v1 PyTorchJob with Kueue labels, then polls
-    until completion.  Kueue can freely suspend/preempt/re-admit
-    the PyTorchJob without affecting this Argo node.
+    trainer.kubeflow.org/v1alpha1 TrainJob with Kueue labels, then
+    polls until completion.  Kueue can freely suspend/preempt/re-admit
+    the TrainJob without affecting this Argo node.
     """
     import datetime
     import time
@@ -82,9 +82,9 @@ def run_training_job(
 
     from kubernetes import client, config
 
-    GROUP = "kubeflow.org"
-    VERSION = "v1"
-    PLURAL = "pytorchjobs"
+    GROUP = "trainer.kubeflow.org"
+    VERSION = "v1alpha1"
+    PLURAL = "trainjobs"
 
     config.load_incluster_config()
     custom_api = client.CustomObjectsApi()
@@ -105,37 +105,9 @@ for elapsed in range(15, duration + 1, 15):
 print(f"[{{datetime.datetime.now():%H:%M:%S}}] Training complete")
 """
 
-    container = {
-        "name": "pytorch",
-        "image": "quay.io/modh/cuda-notebooks:cuda-jupyter-minimal-ubi9-python-3.11-20250630",
-        "command": ["python3", "-c", training_script],
-        "resources": {
-            "requests": {
-                "cpu": "2",
-                "memory": "4Gi",
-                "nvidia.com/gpu": str(gpus_per_replica),
-            },
-            "limits": {
-                "cpu": "2",
-                "memory": "4Gi",
-                "nvidia.com/gpu": str(gpus_per_replica),
-            },
-        },
-    }
-
-    replica_spec = {
-        "replicas": 1,
-        "restartPolicy": "OnFailure",
-        "template": {
-            "spec": {
-                "containers": [container],
-            },
-        },
-    }
-
-    pytorch_job = {
+    trainjob = {
         "apiVersion": f"{GROUP}/{VERSION}",
-        "kind": "PyTorchJob",
+        "kind": "TrainJob",
         "metadata": {
             "name": job_name,
             "namespace": namespace,
@@ -146,57 +118,62 @@ print(f"[{{datetime.datetime.now():%H:%M:%S}}] Training complete")
         },
         "spec": {
             "suspend": True,
-            "pytorchReplicaSpecs": {
-                "Master": replica_spec,
+            "runtimeRef": {
+                "name": "torch-distributed",
+            },
+            "trainer": {
+                "image": "quay.io/modh/cuda-notebooks:cuda-jupyter-minimal-ubi9-python-3.11-20250630",
+                "command": ["python3", "-c", training_script],
+                "numNodes": num_nodes,
+                "resourcesPerNode": {
+                    "requests": {
+                        "cpu": "2",
+                        "memory": "4Gi",
+                        "nvidia.com/gpu": str(gpus_per_node),
+                    },
+                    "limits": {
+                        "cpu": "2",
+                        "memory": "4Gi",
+                        "nvidia.com/gpu": str(gpus_per_node),
+                    },
+                },
             },
         },
     }
 
-    if num_workers > 0:
-        worker_spec = {
-            "replicas": num_workers,
-            "restartPolicy": "OnFailure",
-            "template": {
-                "spec": {
-                    "containers": [container],
-                },
-            },
-        }
-        pytorch_job["spec"]["pytorchReplicaSpecs"]["Worker"] = worker_spec
-
-    total_gpus = (1 + num_workers) * gpus_per_replica
-    print(f"[{datetime.datetime.now():%H:%M:%S}] Creating PyTorchJob {job_name} "
-          f"(queue={kueue_queue}, master=1, workers={num_workers}, "
-          f"gpus/replica={gpus_per_replica}, total_gpus={total_gpus}, "
+    total_gpus = num_nodes * gpus_per_node
+    print(f"[{datetime.datetime.now():%H:%M:%S}] Creating TrainJob {job_name} "
+          f"(queue={kueue_queue}, nodes={num_nodes}, "
+          f"gpus/node={gpus_per_node}, total_gpus={total_gpus}, "
           f"duration={train_duration}s)")
     custom_api.create_namespaced_custom_object(
         group=GROUP, version=VERSION, namespace=namespace,
-        plural=PLURAL, body=pytorch_job,
+        plural=PLURAL, body=trainjob,
     )
 
     while True:
-        pj = custom_api.get_namespaced_custom_object(
+        tj = custom_api.get_namespaced_custom_object(
             group=GROUP, version=VERSION, namespace=namespace,
             plural=PLURAL, name=job_name,
         )
 
         conditions = {
             c["type"]: c["status"]
-            for c in pj.get("status", {}).get("conditions", [])
+            for c in tj.get("status", {}).get("conditions", [])
         }
-        suspended = pj.get("spec", {}).get("suspend", False)
+        suspended = tj.get("spec", {}).get("suspend", False)
 
-        if conditions.get("Succeeded") == "True":
-            print(f"[{datetime.datetime.now():%H:%M:%S}] PyTorchJob {job_name} succeeded")
+        if conditions.get("Succeeded") == "True" or conditions.get("Complete") == "True":
+            print(f"[{datetime.datetime.now():%H:%M:%S}] TrainJob {job_name} succeeded")
             break
 
         if conditions.get("Failed") == "True":
             msg = next(
-                (c.get("message", "") for c in pj["status"]["conditions"]
+                (c.get("message", "") for c in tj["status"]["conditions"]
                  if c["type"] == "Failed"),
                 "",
             )
-            raise RuntimeError(f"PyTorchJob {job_name} failed: {msg}")
+            raise RuntimeError(f"TrainJob {job_name} failed: {msg}")
 
         if suspended:
             status = "suspended (Kueue preempted or waiting for admission)"
@@ -207,13 +184,13 @@ print(f"[{{datetime.datetime.now():%H:%M:%S}}] Training complete")
         else:
             status = "pending"
 
-        print(f"[{datetime.datetime.now():%H:%M:%S}] PyTorchJob {job_name}: {status}")
+        print(f"[{datetime.datetime.now():%H:%M:%S}] TrainJob {job_name}: {status}")
         time.sleep(poll_interval)
 
     try:
         pods = core_v1.list_namespaced_pod(
             namespace=namespace,
-            label_selector=f"training.kubeflow.org/job-name={job_name}",
+            label_selector=f"trainer.kubeflow.org/trainjob-name={job_name}",
         )
         for pod in pods.items:
             try:
@@ -244,9 +221,9 @@ def evaluation(model_status: str) -> str:
 @dsl.pipeline(
     name="kfp-kueue-gpu-demo",
     description=(
-        "GPU pipeline with Kueue-managed PyTorchJob. "
-        "The KFP component launches and watches a kubeflow.org/v1 "
-        "PyTorchJob that Kueue can suspend/preempt/re-admit natively."
+        "GPU pipeline with Kueue-managed TrainJob. "
+        "The KFP component launches and watches a trainer.kubeflow.org/v1alpha1 "
+        "TrainJob that Kueue can suspend/preempt/re-admit natively."
     ),
 )
 def gpu_pipeline():

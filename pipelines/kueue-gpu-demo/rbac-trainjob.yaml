@@ -2,20 +2,20 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: pytorchjob-manager
+  name: trainjob-manager
 rules:
-- apiGroups: ["kubeflow.org"]
-  resources: ["pytorchjobs"]
+- apiGroups: ["trainer.kubeflow.org"]
+  resources: ["trainjobs"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: pipeline-runner-pytorchjob
+  name: pipeline-runner-trainjob
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: pytorchjob-manager
+  name: trainjob-manager
 subjects:
 - kind: ServiceAccount
   name: pipeline-runner-dspa

@@ -3,7 +3,7 @@ from typing import Dict, List
 
 from kfp import compiler, dsl
 
-
+# Base container image and ML dependencies shared across components
 PYTHON_IMAGE = "python:3.11-slim"
 SKLEARN_PACKAGES = [
     "joblib==1.4.2",
@@ -12,6 +12,10 @@ SKLEARN_PACKAGES = [
 ]
 
 
+# ── Step 1: Data Preparation ──────────────────────────────────────────────────
+# Loads the breast cancer dataset and splits it into a development set (for
+# training + validation during the sweep) and a held-out test set (used only
+# once, after the best hyperparameters are chosen, to get an unbiased score).
 @dsl.component(
     base_image=PYTHON_IMAGE,
     packages_to_install=SKLEARN_PACKAGES,
@@ -26,9 +30,13 @@ def create_dataset(
     from sklearn.model_selection import train_test_split
 
     frame = load_breast_cancer(as_frame=True).frame
+
+    # 80/20 stratified split keeps class proportions equal in both sets
     development_frame, test_frame = train_test_split(
         frame, test_size=0.20, random_state=seed, stratify=frame["target"]
     )
+
+    # Save each split as a CSV artifact and attach metadata for lineage tracking
     for artifact, subset, role in [
         (development, development_frame, "development"),
         (test, test_frame, "held-out-test"),
@@ -41,6 +49,11 @@ def create_dataset(
         })
 
 
+# ── Step 2: Trial Generation ──────────────────────────────────────────────────
+# Takes a JSON search space (lists of candidate values for each hyperparameter)
+# and expands it into concrete trial configurations.  Supports two strategies:
+#   "grid"   – enumerate every combination (full Cartesian product)
+#   "random" – sample a fixed number of combinations without replacement
 @dsl.component(base_image=PYTHON_IMAGE)
 def generate_trials(
     search_space_json: str,
@@ -54,6 +67,7 @@ def generate_trials(
     import random
     import sys
 
+    # ── Validate the search space ────────────────────────────────────────
     search_space = json.loads(search_space_json)
     required = {"n_estimators", "max_depth", "min_samples_split"}
     if not isinstance(search_space, dict) or set(search_space) != required:
@@ -71,13 +85,16 @@ def generate_trials(
             raise ValueError(f"{name} contains duplicate candidates")
         values.append(candidates)
 
+    # ── Select which trial indices to run ────────────────────────────────
     total = math.prod(len(v) for v in values)
     output_cap = 512
     if strategy == "grid":
+        # Use every combination
         if total > output_cap:
             raise ValueError(f"Grid has {total} trials; limit is {output_cap}")
         indices = range(total)
     elif strategy == "random":
+        # Randomly sample max_trials combinations from the full grid
         if max_trials <= 0 or max_trials > output_cap:
             raise ValueError(f"max_trials must be in 1..{output_cap}")
         if total > sys.maxsize:
@@ -86,6 +103,9 @@ def generate_trials(
     else:
         raise ValueError("strategy must be 'grid' or 'random'")
 
+    # ── Convert flat indices back into hyperparameter dicts ──────────────
+    # Each index maps to a unique combination via repeated divmod across
+    # the candidate lists (like converting a number to mixed-radix digits).
     selected = []
     for index in indices:
         trial = {}
@@ -99,6 +119,11 @@ def generate_trials(
     return selected
 
 
+# ── Step 3: Train One Trial ───────────────────────────────────────────────────
+# Each trial trains a RandomForestClassifier with one specific set of
+# hyperparameters.  The development set is further split 75/25 into
+# train/validation so that validation accuracy can be compared across trials
+# without touching the held-out test set.
 @dsl.component(
     base_image=PYTHON_IMAGE,
     packages_to_install=SKLEARN_PACKAGES,
@@ -122,6 +147,7 @@ def train_trial(
     features = frame.drop(columns=["target"])
     target = frame["target"]
 
+    # Split the development set into train/validation for this trial
     x_train, x_valid, y_train, y_valid = train_test_split(
         features,
         target,
@@ -136,6 +162,7 @@ def train_trial(
         "min_samples_split": int(trial["min_samples_split"]),
     }
 
+    # Train a RandomForest with this trial's hyperparameters and score it
     model = RandomForestClassifier(
         **parameters,
         random_state=seed,
@@ -148,6 +175,7 @@ def train_trial(
     if not math.isfinite(metric_value):
         raise ValueError(f"Trial produced a non-finite metric: {metric_value}")
 
+    # Deterministic trial ID derived from parameters + seed for deduplication
     canonical_parameters = json.dumps(parameters, sort_keys=True)
     trial_id = hashlib.sha256((canonical_parameters + ":" + str(seed)).encode("utf-8")).hexdigest()[:12]
 
@@ -164,6 +192,10 @@ def train_trial(
     return result_json
 
 
+# ── Step 4: Select the Best Trial ─────────────────────────────────────────────
+# Collects all trial results, validates them, and picks the winner based on
+# the optimization direction (maximize or minimize accuracy).  Ties are broken
+# deterministically by trial_id.
 @dsl.component(base_image=PYTHON_IMAGE)
 def select_best(
     trial_results_json: List[str],
@@ -176,6 +208,7 @@ def select_best(
     if direction not in {"maximize", "minimize"}:
         raise ValueError("direction must be 'maximize' or 'minimize'")
 
+    # Parse and validate every trial result
     valid_results = []
     for raw_result in trial_results_json:
         result = json.loads(raw_result)
@@ -192,6 +225,7 @@ def select_best(
     if not valid_results:
         raise RuntimeError("No successful trial produced a finite metric")
 
+    # Pick the best trial; trial_id as a secondary key ensures stable ordering
     best = (
         max(valid_results, key=lambda item: (item["metric_value"], item["trial_id"]))
         if direction == "maximize"
@@ -204,6 +238,11 @@ def select_best(
     return best_json
 
 
+# ── Step 5: Retrain Final Model ───────────────────────────────────────────────
+# Once the best hyperparameters are chosen, this step retrains a model on
+# the *entire* development set (no validation hold-out this time) and
+# evaluates it on the held-out test set for an unbiased accuracy estimate.
+# Outputs the serialized model artifact and a JSON report.
 @dsl.component(
     base_image=PYTHON_IMAGE,
     packages_to_install=SKLEARN_PACKAGES,
@@ -228,10 +267,12 @@ def train_final_model(
     best_result = json.loads(best_result_json)
     parameters = best_result["parameters"]
 
+    # Train on the full development set (no validation split needed anymore)
     frame = pd.read_csv(dataset.path)
     features = frame.drop(columns=["target"])
     target = frame["target"]
 
+    # Evaluate on the held-out test set that was never seen during the sweep
     test_frame = pd.read_csv(test_dataset.path)
     x_train, y_train = features, target
     x_test = test_frame.drop(columns=["target"])
@@ -247,8 +288,11 @@ def train_final_model(
     final_model.fit(x_train, y_train)
 
     test_accuracy = float(accuracy_score(y_test, final_model.predict(x_test)))
+
+    # Persist the trained model as a joblib artifact
     joblib.dump(final_model, model.path)
 
+    # Write a JSON report with the winning trial info and final test accuracy
     final_report = {
         "selected_trial": best_result,
         "test_accuracy": test_accuracy,
@@ -256,6 +300,7 @@ def train_final_model(
     with open(report.path, "w", encoding="utf-8") as report_file:
         json.dump(final_report, report_file, indent=2, sort_keys=True)
 
+    # Attach metadata to artifacts for lineage and model registry integration
     model.metadata["framework"] = "scikit-learn"
     model.metadata["algorithm"] = "RandomForestClassifier"
     model.metadata["test_accuracy"] = test_accuracy
@@ -266,6 +311,8 @@ def train_final_model(
     return test_accuracy
 
 
+# ── Default search space ──────────────────────────────────────────────────────
+# 3 × 3 × 2 = 18 combinations; small enough for a full grid search.
 DEFAULT_SEARCH_SPACE = json.dumps(
     {
         "n_estimators": [50, 100, 200],
@@ -276,6 +323,9 @@ DEFAULT_SEARCH_SPACE = json.dumps(
 )
 
 
+# ── Pipeline definition ──────────────────────────────────────────────────────
+# Wires the five steps together:
+#   create_dataset ──► generate_trials ──► ParallelFor(train_trial) ──► select_best ──► train_final_model
 @dsl.pipeline(name="random-forest-hyperparameter-sweep")
 def hyperparameter_sweep_pipeline(
     search_space_json: str = DEFAULT_SEARCH_SPACE,
@@ -284,8 +334,10 @@ def hyperparameter_sweep_pipeline(
     direction: str = "maximize",
     seed: int = 42,
 ):
+    # 1. Prepare development + test splits
     dataset_task = create_dataset(seed=seed)
 
+    # 2. Expand the search space into a list of trial configs
     trials_task = generate_trials(
         search_space_json=search_space_json,
         strategy=strategy,
@@ -293,6 +345,7 @@ def hyperparameter_sweep_pipeline(
         seed=seed,
     )
 
+    # 3. Run each trial in parallel (up to 4 at a time)
     with dsl.ParallelFor(
         items=trials_task.output,
         parallelism=4,
@@ -306,11 +359,14 @@ def hyperparameter_sweep_pipeline(
         trial_task.set_cpu_request("1")
         trial_task.set_memory_request("1Gi")
 
+    # 4. Collect all trial results and pick the best one
     best_task = select_best(
         trial_results_json=dsl.Collected(trial_task.output),
         direction=direction,
     )
 
+    # 5. Retrain on the full development set with the winning hyperparameters
+    #    and evaluate on the held-out test set
     final_task = train_final_model(
         dataset=dataset_task.outputs["development"],
         test_dataset=dataset_task.outputs["test"],
@@ -321,6 +377,9 @@ def hyperparameter_sweep_pipeline(
     final_task.set_memory_request("2Gi")
 
 
+# ── CLI entrypoint ────────────────────────────────────────────────────────────
+# Running this file directly compiles the pipeline to a YAML spec that can
+# be submitted to a Kubeflow Pipelines cluster.
 if __name__ == "__main__":
     import pathlib
 

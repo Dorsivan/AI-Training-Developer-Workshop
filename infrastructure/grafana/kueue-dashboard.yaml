@@ -1,0 +1,253 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kueue-dashboard
+  namespace: grafana
+data:
+  kueue.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 1,
+      "links": [],
+      "panels": [
+        {
+          "collapsed": false,
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+          "id": 100,
+          "title": "Cluster Queue Overview",
+          "type": "row"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 0.7 }, { "color": "red", "value": 0.9 }] },
+              "unit": "short",
+              "min": 0, "max": 1,
+              "mappings": []
+            },
+            "overrides": []
+          },
+          "gridPos": { "h": 5, "w": 6, "x": 0, "y": 1 },
+          "id": 1,
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "showThresholdLabels": false, "showThresholdMarkers": true, "sizing": "auto" },
+          "title": "GPU Utilization — team-a",
+          "type": "gauge",
+          "targets": [
+            {
+              "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"team-a-cluster-queue\", resource=\"nvidia.com/gpu\"} / kueue_cluster_queue_nominal_quota{cluster_queue=\"team-a-cluster-queue\", resource=\"nvidia.com/gpu\"}",
+              "legendFormat": "GPU Usage",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 0.7 }, { "color": "red", "value": 0.9 }] },
+              "unit": "short",
+              "min": 0, "max": 1
+            }
+          },
+          "gridPos": { "h": 5, "w": 6, "x": 6, "y": 1 },
+          "id": 2,
+          "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "showThresholdLabels": false, "showThresholdMarkers": true, "sizing": "auto" },
+          "title": "GPU Utilization — team-b",
+          "type": "gauge",
+          "targets": [
+            {
+              "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"team-b-cluster-queue\", resource=\"nvidia.com/gpu\"} / kueue_cluster_queue_nominal_quota{cluster_queue=\"team-b-cluster-queue\", resource=\"nvidia.com/gpu\"}",
+              "legendFormat": "GPU Usage",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "custom": { "fillOpacity": 10, "showPoints": "auto", "spanNulls": false }
+            }
+          },
+          "gridPos": { "h": 5, "w": 12, "x": 12, "y": 1 },
+          "id": 3,
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+          "title": "Pending Workloads",
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "kueue_cluster_queue_status{cluster_queue=~\"team-.*\", status=\"pending\"}",
+              "legendFormat": "{{ cluster_queue }}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "collapsed": false,
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 },
+          "id": 101,
+          "title": "Resource Usage Over Time",
+          "type": "row"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "custom": { "fillOpacity": 30, "showPoints": "never", "spanNulls": false },
+              "unit": "short"
+            }
+          },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 7 },
+          "id": 4,
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+          "title": "GPU Usage vs Quota",
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "kueue_cluster_queue_nominal_quota{cluster_queue=~\"team-.*\", resource=\"nvidia.com/gpu\"}",
+              "legendFormat": "{{ cluster_queue }} — quota",
+              "refId": "A"
+            },
+            {
+              "expr": "kueue_cluster_queue_resource_usage{cluster_queue=~\"team-.*\", resource=\"nvidia.com/gpu\"}",
+              "legendFormat": "{{ cluster_queue }} — used",
+              "refId": "B"
+            },
+            {
+              "expr": "kueue_cluster_queue_borrowing_usage{cluster_queue=~\"team-.*\", resource=\"nvidia.com/gpu\"}",
+              "legendFormat": "{{ cluster_queue }} — borrowed",
+              "refId": "C"
+            }
+          ]
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "custom": { "fillOpacity": 30, "showPoints": "never", "spanNulls": false },
+              "unit": "short"
+            }
+          },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 7 },
+          "id": 5,
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+          "title": "CPU Usage vs Quota",
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "kueue_cluster_queue_nominal_quota{cluster_queue=~\"team-.*\", resource=\"cpu\"}",
+              "legendFormat": "{{ cluster_queue }} — quota",
+              "refId": "A"
+            },
+            {
+              "expr": "kueue_cluster_queue_resource_usage{cluster_queue=~\"team-.*\", resource=\"cpu\"}",
+              "legendFormat": "{{ cluster_queue }} — used",
+              "refId": "B"
+            }
+          ]
+        },
+        {
+          "collapsed": false,
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 15 },
+          "id": 102,
+          "title": "Workload Lifecycle",
+          "type": "row"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "custom": { "fillOpacity": 20, "showPoints": "never", "spanNulls": false, "stacking": { "mode": "normal" } },
+              "unit": "short"
+            }
+          },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+          "id": 6,
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+          "title": "Admitted vs Pending Workloads",
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "kueue_cluster_queue_status{cluster_queue=~\"team-.*\", status=\"active\"}",
+              "legendFormat": "{{ cluster_queue }} — active",
+              "refId": "A"
+            },
+            {
+              "expr": "kueue_cluster_queue_status{cluster_queue=~\"team-.*\", status=\"pending\"}",
+              "legendFormat": "{{ cluster_queue }} — pending",
+              "refId": "B"
+            }
+          ]
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "custom": { "fillOpacity": 10, "showPoints": "never", "spanNulls": false },
+              "unit": "short"
+            }
+          },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+          "id": 7,
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+          "title": "Preemptions",
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "rate(kueue_cluster_queue_evicted_workloads_total{cluster_queue=~\"team-.*\"}[5m])",
+              "legendFormat": "{{ cluster_queue }} — {{ reason }}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "collapsed": false,
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 },
+          "id": 103,
+          "title": "Admission Latency",
+          "type": "row"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "custom": { "fillOpacity": 10, "showPoints": "auto", "spanNulls": false },
+              "unit": "s"
+            }
+          },
+          "gridPos": { "h": 7, "w": 24, "x": 0, "y": 25 },
+          "id": 8,
+          "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+          "title": "Workload Time to Admission (p95)",
+          "type": "timeseries",
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.95, rate(kueue_admission_wait_time_seconds_bucket{cluster_queue=~\"team-.*\"}[5m]))",
+              "legendFormat": "{{ cluster_queue }} p95",
+              "refId": "A"
+            }
+          ]
+        }
+      ],
+      "refresh": "10s",
+      "schemaVersion": 39,
+      "tags": ["kueue", "gpu", "quota"],
+      "templating": { "list": [] },
+      "time": { "from": "now-30m", "to": "now" },
+      "timepicker": {},
+      "timezone": "browser",
+      "title": "Kueue GPU Quota Management",
+      "uid": "kueue-gpu-quota",
+      "version": 1
+    }

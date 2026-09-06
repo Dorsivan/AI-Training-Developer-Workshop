@@ -5,7 +5,7 @@ metadata:
   namespace: distributed-training
 spec:
   accessModes: [ReadWriteMany]
-  storageClassName: REPLACE_WITH_RWX_STORAGE_CLASS
+  storageClassName: nfs
   resources:
     requests:
       storage: 10Gi
