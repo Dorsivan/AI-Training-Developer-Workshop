@@ -19,7 +19,7 @@ from kfp import dsl, compiler
 from kfp import kubernetes
 
 # Kueue scheduling configuration (compile-time values — recompile to change).
-KUEUE_LOCAL_QUEUE = "pipeline-local-queue"
+KUEUE_LOCAL_QUEUE = "team-a-local-queue"
 KUEUE_PRIORITY = "pipeline-default-priority"
 
 

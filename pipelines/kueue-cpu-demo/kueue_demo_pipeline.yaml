@@ -1,0 +1,357 @@
+# PIPELINE DEFINITION
+# Name: kfp-kueue-cpu-demo
+# Description: KFP pipeline demonstrating Kueue CPU quota queuing. Three parallel training tasks compete for limited CPU quota.
+components:
+  comp-evaluate:
+    executorLabel: exec-evaluate
+    inputDefinitions:
+      parameters:
+        results:
+          parameterType: LIST
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+  comp-preprocess:
+    executorLabel: exec-preprocess
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+  comp-train:
+    executorLabel: exec-train
+    inputDefinitions:
+      parameters:
+        model_name:
+          parameterType: STRING
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+  comp-train-2:
+    executorLabel: exec-train-2
+    inputDefinitions:
+      parameters:
+        model_name:
+          parameterType: STRING
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+  comp-train-3:
+    executorLabel: exec-train-3
+    inputDefinitions:
+      parameters:
+        model_name:
+          parameterType: STRING
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+deploymentSpec:
+  executors:
+    exec-evaluate:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - evaluate
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef evaluate(results: list) -> str:\n    import json\n    print(f\"\
+          Evaluating {len(results)} models: {results}\")\n    print(\"Evaluation complete\"\
+          )\n    return json.dumps({\"models\": results, \"status\": \"evaluated\"\
+          })\n\n"
+        image: registry.access.redhat.com/ubi9/python-311:latest
+        resources:
+          cpuLimit: 0.5
+          cpuRequest: 0.5
+          memoryLimit: 0.268435456
+          memoryRequest: 0.268435456
+          resourceCpuLimit: 500m
+          resourceCpuRequest: 500m
+          resourceMemoryLimit: 256Mi
+          resourceMemoryRequest: 256Mi
+    exec-preprocess:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - preprocess
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef preprocess() -> str:\n    import time\n    print(\"Starting preprocessing...\"\
+          )\n    time.sleep(30)\n    print(\"Preprocessing complete\")\n    return\
+          \ \"done\"\n\n"
+        image: registry.access.redhat.com/ubi9/python-311:latest
+        resources:
+          cpuLimit: 0.5
+          cpuRequest: 0.5
+          memoryLimit: 0.268435456
+          memoryRequest: 0.268435456
+          resourceCpuLimit: 500m
+          resourceCpuRequest: 500m
+          resourceMemoryLimit: 256Mi
+          resourceMemoryRequest: 256Mi
+    exec-train:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - train
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef train(model_name: str) -> str:\n    import time\n    print(f\"\
+          Training model: {model_name}\")\n    time.sleep(120)\n    print(f\"Training\
+          \ complete: {model_name}\")\n    return f\"{model_name}-trained\"\n\n"
+        image: registry.access.redhat.com/ubi9/python-311:latest
+        resources:
+          cpuLimit: 4.0
+          cpuRequest: 4.0
+          memoryLimit: 1.073741824
+          memoryRequest: 1.073741824
+          resourceCpuLimit: '4'
+          resourceCpuRequest: '4'
+          resourceMemoryLimit: 1Gi
+          resourceMemoryRequest: 1Gi
+    exec-train-2:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - train
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef train(model_name: str) -> str:\n    import time\n    print(f\"\
+          Training model: {model_name}\")\n    time.sleep(120)\n    print(f\"Training\
+          \ complete: {model_name}\")\n    return f\"{model_name}-trained\"\n\n"
+        image: registry.access.redhat.com/ubi9/python-311:latest
+        resources:
+          cpuLimit: 4.0
+          cpuRequest: 4.0
+          memoryLimit: 1.073741824
+          memoryRequest: 1.073741824
+          resourceCpuLimit: '4'
+          resourceCpuRequest: '4'
+          resourceMemoryLimit: 1Gi
+          resourceMemoryRequest: 1Gi
+    exec-train-3:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - train
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef train(model_name: str) -> str:\n    import time\n    print(f\"\
+          Training model: {model_name}\")\n    time.sleep(120)\n    print(f\"Training\
+          \ complete: {model_name}\")\n    return f\"{model_name}-trained\"\n\n"
+        image: registry.access.redhat.com/ubi9/python-311:latest
+        resources:
+          cpuLimit: 4.0
+          cpuRequest: 4.0
+          memoryLimit: 1.073741824
+          memoryRequest: 1.073741824
+          resourceCpuLimit: '4'
+          resourceCpuRequest: '4'
+          resourceMemoryLimit: 1Gi
+          resourceMemoryRequest: 1Gi
+pipelineInfo:
+  description: KFP pipeline demonstrating Kueue CPU quota queuing. Three parallel
+    training tasks compete for limited CPU quota.
+  name: kfp-kueue-cpu-demo
+root:
+  dag:
+    tasks:
+      evaluate:
+        cachingOptions: {}
+        componentRef:
+          name: comp-evaluate
+        dependentTasks:
+        - train
+        - train-2
+        - train-3
+        inputs:
+          parameters:
+            pipelinechannel--train-2-Output:
+              taskOutputParameter:
+                outputParameterKey: Output
+                producerTask: train-2
+            pipelinechannel--train-3-Output:
+              taskOutputParameter:
+                outputParameterKey: Output
+                producerTask: train-3
+            pipelinechannel--train-Output:
+              taskOutputParameter:
+                outputParameterKey: Output
+                producerTask: train
+            results:
+              runtimeValue:
+                constant:
+                - '{{$.inputs.parameters[''pipelinechannel--train-Output'']}}'
+                - '{{$.inputs.parameters[''pipelinechannel--train-2-Output'']}}'
+                - '{{$.inputs.parameters[''pipelinechannel--train-3-Output'']}}'
+        taskInfo:
+          name: evaluate
+      preprocess:
+        cachingOptions: {}
+        componentRef:
+          name: comp-preprocess
+        taskInfo:
+          name: preprocess
+      train:
+        cachingOptions: {}
+        componentRef:
+          name: comp-train
+        dependentTasks:
+        - preprocess
+        inputs:
+          parameters:
+            model_name:
+              runtimeValue:
+                constant: model-a
+        taskInfo:
+          name: train
+      train-2:
+        cachingOptions: {}
+        componentRef:
+          name: comp-train-2
+        dependentTasks:
+        - preprocess
+        inputs:
+          parameters:
+            model_name:
+              runtimeValue:
+                constant: model-b
+        taskInfo:
+          name: train-2
+      train-3:
+        cachingOptions: {}
+        componentRef:
+          name: comp-train-3
+        dependentTasks:
+        - preprocess
+        inputs:
+          parameters:
+            model_name:
+              runtimeValue:
+                constant: model-c
+        taskInfo:
+          name: train-3
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.17.0
+---
+platforms:
+  kubernetes:
+    deploymentSpec:
+      executors:
+        exec-evaluate:
+          podMetadata:
+            labels:
+              kueue.x-k8s.io/queue-name: team-a-local-queue
+        exec-preprocess:
+          podMetadata:
+            labels:
+              kueue.x-k8s.io/queue-name: team-a-local-queue
+        exec-train:
+          podMetadata:
+            labels:
+              kueue.x-k8s.io/queue-name: team-a-local-queue
+        exec-train-2:
+          podMetadata:
+            labels:
+              kueue.x-k8s.io/queue-name: team-a-local-queue
+        exec-train-3:
+          podMetadata:
+            labels:
+              kueue.x-k8s.io/queue-name: team-a-local-queue

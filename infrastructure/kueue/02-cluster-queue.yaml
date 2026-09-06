@@ -1,24 +1,51 @@
-apiVersion: kueue.x-k8s.io/v1beta1
+apiVersion: kueue.x-k8s.io/v1beta2
 kind: ClusterQueue
 metadata:
-  name: pipeline-cluster-queue
+  name: team-a-cluster-queue
 spec:
+  cohortName: gpu-cohort
   preemption:
     withinClusterQueue: LowerPriority
     reclaimWithinCohort: Any
+    borrowWithinCohort:
+      policy: LowerPriority
   namespaceSelector: {}
   resourceGroups:
-    - coveredResources: ["cpu", "memory"]
+    - coveredResources: ["cpu", "memory", "nvidia.com/gpu"]
       flavors:
         - name: default-flavor
           resources:
             - name: "cpu"
-              nominalQuota: 8
+              nominalQuota: 16
             - name: "memory"
-              nominalQuota: "16Gi"
-    - coveredResources: ["nvidia.com/gpu"]
-      flavors:
-        - name: gpu-flavor
-          resources:
+              nominalQuota: "64Gi"
             - name: "nvidia.com/gpu"
-              nominalQuota: 2
+              nominalQuota: 1
+              borrowingLimit: 1
+              lendingLimit: 1
+---
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ClusterQueue
+metadata:
+  name: team-b-cluster-queue
+spec:
+  cohortName: gpu-cohort
+  preemption:
+    withinClusterQueue: LowerPriority
+    reclaimWithinCohort: Any
+    borrowWithinCohort:
+      policy: LowerPriority
+  namespaceSelector: {}
+  resourceGroups:
+    - coveredResources: ["cpu", "memory", "nvidia.com/gpu"]
+      flavors:
+        - name: default-flavor
+          resources:
+            - name: "cpu"
+              nominalQuota: 16
+            - name: "memory"
+              nominalQuota: "64Gi"
+            - name: "nvidia.com/gpu"
+              nominalQuota: 1
+              borrowingLimit: 1
+              lendingLimit: 1

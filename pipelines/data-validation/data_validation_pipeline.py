@@ -21,7 +21,9 @@ from kfp import compiler, dsl
 from kfp import kubernetes
 
 # Kueue scheduling configuration (compile-time values — recompile to change).
-KUEUE_LOCAL_QUEUE = "pipeline-local-queue"
+# Override with KUEUE_LOCAL_QUEUE env var to compile for a different queue.
+import os
+KUEUE_LOCAL_QUEUE = os.environ.get("KUEUE_LOCAL_QUEUE", "team-a-local-queue")
 KUEUE_PRIORITY = "pipeline-default-priority"
 
 
@@ -31,14 +33,16 @@ def apply_kueue_config(task, queue_name=KUEUE_LOCAL_QUEUE, priority_class=KUEUE_
     kubernetes.add_pod_label(task, "kueue.x-k8s.io/priority-class", priority_class)
 
 
-def apply_resource_config(task, cpu, memory, gpu):
-    """Set CPU/memory requests+limits and optional GPU limit on a task."""
-    task.set_cpu_request(cpu)
-    task.set_cpu_limit(cpu)
-    task.set_memory_request(memory)
-    task.set_memory_limit(memory)
-    if gpu and gpu != "0":
-        task.set_gpu_limit(gpu)
+CPU = "500m"
+MEMORY = "512Mi"
+
+
+def apply_resource_config(task):
+    """Set CPU/memory requests+limits on a task."""
+    task.set_cpu_request(CPU)
+    task.set_cpu_limit(CPU)
+    task.set_memory_request(MEMORY)
+    task.set_memory_limit(MEMORY)
 
 
 # ---------------------------------------------------------------------------
@@ -326,14 +330,12 @@ def data_validation_pipeline(
     num_rows: int = 100,
     null_fraction: float = 0.05,
     pvc_size: str = "1Gi",
-    storage_class: str = "",
-    cpu: str = "500m",
-    memory: str = "512Mi",
-    gpu: str = "0",
+    pvc_name: str = "data-validation-shared-data",
+    storage_class: str = "nfs",
 ):
-    # Step 0: Dynamically create a PVC for sharing data between steps.
+    # Step 0: Create a PVC for sharing data between steps.
     create_pvc_task = kubernetes.CreatePVC(
-        pvc_name_suffix="-shared-data",
+        pvc_name=pvc_name,
         access_modes=["ReadWriteOnce"],
         size=pvc_size,
         storage_class_name=storage_class if storage_class else None,
@@ -347,21 +349,21 @@ def data_validation_pipeline(
     ingest_task.after(create_pvc_task)
     kubernetes.mount_pvc(
         ingest_task,
-        pvc_name=create_pvc_task.outputs["name"],
+        pvc_name=pvc_name,
         mount_path="/mnt/shared",
     )
     apply_kueue_config(ingest_task)
-    apply_resource_config(ingest_task, cpu, memory, gpu)
+    apply_resource_config(ingest_task)
 
     # Step 2: Validate data quality (reads from PVC, returns quality_score).
     validate_task = validate_data(data_path=ingest_task.output)
     kubernetes.mount_pvc(
         validate_task,
-        pvc_name=create_pvc_task.outputs["name"],
+        pvc_name=pvc_name,
         mount_path="/mnt/shared",
     )
     apply_kueue_config(validate_task)
-    apply_resource_config(validate_task, cpu, memory, gpu)
+    apply_resource_config(validate_task)
 
     # Step 3: Conditional branching based on quality score.
     with dsl.If(validate_task.output >= quality_threshold):
@@ -369,39 +371,39 @@ def data_validation_pipeline(
         transform_task = transform_data()
         kubernetes.mount_pvc(
             transform_task,
-            pvc_name=create_pvc_task.outputs["name"],
+            pvc_name=pvc_name,
             mount_path="/mnt/shared",
         )
         apply_kueue_config(transform_task)
-        apply_resource_config(transform_task, cpu, memory, gpu)
+        apply_resource_config(transform_task)
 
         report_task = generate_report(row_count=transform_task.output)
         kubernetes.mount_pvc(
             report_task,
-            pvc_name=create_pvc_task.outputs["name"],
+            pvc_name=pvc_name,
             mount_path="/mnt/shared",
         )
         apply_kueue_config(report_task)
-        apply_resource_config(report_task, cpu, memory, gpu)
+        apply_resource_config(report_task)
 
     with dsl.Else():
         # --- Bad-data path ---
         quarantine_task = quarantine_data()
         kubernetes.mount_pvc(
             quarantine_task,
-            pvc_name=create_pvc_task.outputs["name"],
+            pvc_name=pvc_name,
             mount_path="/mnt/shared",
         )
         apply_kueue_config(quarantine_task)
-        apply_resource_config(quarantine_task, cpu, memory, gpu)
+        apply_resource_config(quarantine_task)
 
         alert_task = send_alert(quarantine_path=quarantine_task.output)
         apply_kueue_config(alert_task)
-        apply_resource_config(alert_task, cpu, memory, gpu)
+        apply_resource_config(alert_task)
 
     # Step 4: Clean up the PVC after all branches complete.
     delete_pvc_task = kubernetes.DeletePVC(
-        pvc_name=create_pvc_task.outputs["name"],
+        pvc_name=pvc_name,
     )
     delete_pvc_task.after(report_task, alert_task)
 

@@ -1,0 +1,216 @@
+# PIPELINE DEFINITION
+# Name: kfp-kueue-gpu-demo
+# Description: GPU pipeline whose training Pod is admitted through Kueue. Kueue delays only the GPU-constrained stage, not the whole pipeline.
+components:
+  comp-evaluation:
+    executorLabel: exec-evaluation
+    inputDefinitions:
+      parameters:
+        model_status:
+          parameterType: STRING
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+  comp-gpu-training:
+    executorLabel: exec-gpu-training
+    inputDefinitions:
+      parameters:
+        data_status:
+          parameterType: STRING
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+  comp-preprocessing:
+    executorLabel: exec-preprocessing
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+deploymentSpec:
+  executors:
+    exec-evaluation:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - evaluation
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef evaluation(model_status: str) -> str:\n    import time\n    print(f\"\
+          Evaluating model (input: {model_status})\")\n    time.sleep(20)\n    print(\"\
+          Evaluation complete\")\n    return \"evaluated\"\n\n"
+        image: registry.access.redhat.com/ubi9/python-311:latest
+        resources:
+          cpuLimit: 0.5
+          cpuRequest: 0.5
+          memoryLimit: 0.268435456
+          memoryRequest: 0.268435456
+          resourceCpuLimit: 500m
+          resourceCpuRequest: 500m
+          resourceMemoryLimit: 256Mi
+          resourceMemoryRequest: 256Mi
+    exec-gpu-training:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - gpu_training
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef gpu_training(data_status: str) -> str:\n    import subprocess\n\
+          \    import time\n\n    print(f\"GPU training started (input: {data_status})\"\
+          )\n    subprocess.run([\"nvidia-smi\"], check=False)\n\n    print(\"Holding\
+          \ GPU for 5 minutes...\")\n    time.sleep(300)\n\n    print(\"GPU training\
+          \ finished\")\n    return \"trained\"\n\n"
+        image: quay.io/modh/cuda-notebooks:cuda-jupyter-minimal-ubi9-python-3.11-20250630
+        resources:
+          accelerator:
+            count: '1'
+            resourceCount: '1'
+            resourceType: nvidia.com/gpu
+            type: nvidia.com/gpu
+          cpuLimit: 2.0
+          cpuRequest: 2.0
+          memoryLimit: 4.294967296
+          memoryRequest: 4.294967296
+          resourceCpuLimit: '2'
+          resourceCpuRequest: '2'
+          resourceMemoryLimit: 4Gi
+          resourceMemoryRequest: 4Gi
+    exec-preprocessing:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - preprocessing
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef preprocessing() -> str:\n    import time\n    print(\"Preprocessing\
+          \ data...\")\n    time.sleep(20)\n    print(\"Preprocessing complete\")\n\
+          \    return \"preprocessed\"\n\n"
+        image: registry.access.redhat.com/ubi9/python-311:latest
+        resources:
+          cpuLimit: 0.5
+          cpuRequest: 0.5
+          memoryLimit: 0.268435456
+          memoryRequest: 0.268435456
+          resourceCpuLimit: 500m
+          resourceCpuRequest: 500m
+          resourceMemoryLimit: 256Mi
+          resourceMemoryRequest: 256Mi
+pipelineInfo:
+  description: GPU pipeline whose training Pod is admitted through Kueue. Kueue delays
+    only the GPU-constrained stage, not the whole pipeline.
+  name: kfp-kueue-gpu-demo
+root:
+  dag:
+    tasks:
+      evaluation:
+        cachingOptions: {}
+        componentRef:
+          name: comp-evaluation
+        dependentTasks:
+        - gpu-training
+        inputs:
+          parameters:
+            model_status:
+              taskOutputParameter:
+                outputParameterKey: Output
+                producerTask: gpu-training
+        taskInfo:
+          name: evaluation
+      gpu-training:
+        cachingOptions: {}
+        componentRef:
+          name: comp-gpu-training
+        dependentTasks:
+        - preprocessing
+        inputs:
+          parameters:
+            data_status:
+              taskOutputParameter:
+                outputParameterKey: Output
+                producerTask: preprocessing
+        taskInfo:
+          name: gpu-training
+      preprocessing:
+        cachingOptions: {}
+        componentRef:
+          name: comp-preprocessing
+        taskInfo:
+          name: preprocessing
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.17.0
+---
+platforms:
+  kubernetes:
+    deploymentSpec:
+      executors:
+        exec-evaluation:
+          podMetadata:
+            labels:
+              kueue.x-k8s.io/queue-name: team-a-local-queue
+        exec-gpu-training:
+          podMetadata:
+            labels:
+              kueue.x-k8s.io/queue-name: team-a-local-queue
+        exec-preprocessing:
+          podMetadata:
+            labels:
+              kueue.x-k8s.io/queue-name: team-a-local-queue

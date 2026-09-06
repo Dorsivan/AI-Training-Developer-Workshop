@@ -13,6 +13,19 @@ stringData:
   MINIO_ROOT_USER: minio
   MINIO_ROOT_PASSWORD: minio123
 ---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-data
+  namespace: minio
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: nfs
+  resources:
+    requests:
+      storage: 10Gi
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -61,7 +74,8 @@ spec:
             periodSeconds: 10
       volumes:
         - name: data
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: minio-data
 ---
 apiVersion: v1
 kind: Service

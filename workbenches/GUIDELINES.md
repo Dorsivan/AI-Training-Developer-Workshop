@@ -7,10 +7,12 @@ Usually, we would build workbench images for one of two reasons:
 
 ### Creating a custom image from a default OpenShift AI image
 
-Start from one of the standard OpenShift AI notebook images and add your packages on top:
+Start from one of the standard OpenShift AI notebook images and add your packages on top.
+The base image already includes the correct entrypoint (`start-notebook.sh`), port (8888),
+and directory structure — so you only need to add your customizations:
 
 ```dockerfile
-FROM image-registry.openshift-image-registry.svc:5000/redhat-ods-applications/jupyter-datascience-notebook:2024.1
+FROM quay.io/modh/odh-generic-data-science-notebook@sha256:<digest>
 
 USER 0
 
@@ -29,60 +31,125 @@ RUN chgrp -R 0 /opt/app-root && chmod -R g=u /opt/app-root
 USER 1001
 ```
 
-### Creating a custom image from your own image 
+### Creating a custom image from your own image
 
 Start from Red Hat UBI and add the Jupyter stack yourself. The key requirements
-are: expose port 8888, serve `/api` for readiness/liveness probes, and run as
-USER 1001.
+for RHOAI compatibility are listed in the section below.
 
 ```dockerfile
-FROM registry.redhat.io/ubi9/python-311:latest
+FROM registry.access.redhat.com/ubi9/python-311:latest
 
 USER 0
 
-# Install system packages.
-RUN dnf install -y gcc python3-devel && \
+RUN dnf install -y gcc python3-devel procps-ng && \
     dnf clean all
 
-# Install JupyterLab and your dependencies.
 COPY requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir jupyterlab -r /tmp/requirements.txt && \
+RUN pip install --no-cache-dir -r /tmp/requirements.txt && \
     rm /tmp/requirements.txt
 
-# Create the workspace directory and make it group-writable.
-RUN mkdir -p /opt/app-root/src && \
+RUN mkdir -p /opt/app-root/etc/jupyter /opt/app-root/bin
+COPY jupyter_server_config.py /opt/app-root/etc/jupyter/
+COPY start-notebook.sh /opt/app-root/bin/
+
+RUN chmod +x /opt/app-root/bin/start-notebook.sh && \
+    mkdir -p /opt/app-root/src && \
     chgrp -R 0 /opt/app-root && chmod -R g=u /opt/app-root
+
+ENV HOME=/opt/app-root/src \
+    JUPYTER_CONFIG_DIR=/opt/app-root/etc/jupyter \
+    APP_ROOT=/opt/app-root \
+    PATH=/opt/app-root/src/.local/bin:/opt/app-root/bin:$PATH
 
 USER 1001
 WORKDIR /opt/app-root/src
 
-EXPOSE 8888
+EXPOSE 8080
 
-CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", \
-     "--no-browser", "--NotebookApp.token=''", \
-     "--NotebookApp.base_url=/", \
-     "--ServerApp.allow_origin='*'"]
+ENTRYPOINT ["start-notebook.sh"]
 ```
 
-Use the Red Hat UBI
+### RHOAI Workbench Image Requirements
 
-Designing your image to run with USER 1001
+The RHOAI Notebook controller expects custom images to follow specific
+conventions. Failing to meet them results in broken probes, missing auth
+sidecars, or no routing.
 
-In OpenShift, your container will run with a random UID and a GID of 0. Make sure that your image is compatible with these user and group requirements, especially if you need write access to directories. Best practice is to design your image to run with USER 1001.
+**Entrypoint — `start-notebook.sh`:**
+The image must use `start-notebook.sh` as its entrypoint, not a hardcoded
+`CMD ["jupyter", "lab", ...]`. The controller passes configuration via the
+`NOTEBOOK_ARGS` env var (base_url, port, token settings). A hardcoded CMD
+ignores `NOTEBOOK_ARGS` and causes base_url mismatches. See
+`custom-jupyter/start-notebook.sh` for a minimal implementation.
 
-Avoid placing artifacts in $HOME
+The `start-notebook.sh` script must NOT set a default `--ServerApp.port`
+because `NOTEBOOK_ARGS` already includes the port. Duplicate port arguments
+cause Jupyter to fail with:
+`Bad config encountered: port only accepts one value, got 2`.
 
-The persistent volume attached to the workbench will be mounted on /opt/app-root/src. This location is also the location of $HOME. Therefore, do not put any files or other resources directly in $HOME because they won’t be visible after the workbench is deployed (and the persistent volume is mounted).
+**Port — 8888 (not 8080):**
+The standard RHOAI images serve on port 8888. The `NOTEBOOK_ARGS` env var
+set by the controller specifies `--ServerApp.port=8888`. The container should
+expose port 8888 and the Notebook CR should set `containerPort: 8888`.
 
-Specifying the API endpoint
+**`/api` endpoint:**
+The readiness and liveness probes query `/notebook/<namespace>/<name>/api`.
+JupyterLab serves this by default when the base_url is set correctly via
+`NOTEBOOK_ARGS`.
 
-OpenShift readiness and liveness probes will query the /api endpoint. For a Jupyter IDE, this is the default endpoint. For other IDEs, you must implement the /api endpoint.
+### Deploying Workbenches via CLI (Notebook CR)
+
+When creating a Notebook CR directly (not through the RHOAI dashboard), the
+following metadata is required for the controller to properly reconcile the
+workbench (inject the auth sidecar, create routing, etc.):
+
+**Labels (required):**
+```yaml
+labels:
+  app: <notebook-name>
+  opendatahub.io/dashboard: "true"
+  opendatahub.io/odh-managed: "true"
+```
+
+**Annotations (required):**
+```yaml
+annotations:
+  notebooks.opendatahub.io/inject-auth: "true"
+  opendatahub.io/image-display-name: "<display name>"
+  opendatahub.io/username: "<user>"
+```
+
+**Important: `inject-auth`, not `inject-oauth`.**
+RHOAI 3.x uses a `kube-rbac-proxy` sidecar for authentication, not the
+legacy OAuth proxy. The annotation is `inject-auth: "true"`. Using the old
+`inject-oauth: "true"` annotation will NOT inject the sidecar, leaving the
+workbench without authentication and without routing through the RHOAI
+gateway.
+
+**The `NOTEBOOK_ARGS` env var:**
+The controller sets `NOTEBOOK_ARGS` on the container with the correct
+`base_url`, `port`, and auth settings. The image entrypoint must read and
+apply these arguments. Example value set by the controller:
+```
+--ServerApp.port=8888
+--ServerApp.token=''
+--ServerApp.password=''
+--ServerApp.base_url=/notebook/<namespace>/<name>
+--ServerApp.quit_button=False
+```
+
+**Routing:**
+The RHOAI controller creates HTTPRoutes through the RHOAI gateway
+(`rh-ai.apps.<cluster>`). You do not need to create OpenShift Routes
+manually. If HTTPRoutes are not created, check that the labels and
+annotations above are correct.
 
 ### Best Practices
 
-- Do not assume a fixed UID at runtime. OpenShift commonly runs containers with an arbitrary UID under its SCC model. Writable directories should be owned by group 0 and have group permissions equivalent to user permissions, e.g. chgrp -R 0 ... && chmod -R g=u ....
-- Do not require root at runtime. Install RPMs/system libraries while building the image, then switch back to the notebook user. Red Hat's own custom-workbench examples install system packages as root and then use USER 1001 for Python packages/runtime.
-- Avoid writing into arbitrary system paths at runtime. Anything the notebook or Python stack needs to modify should be under writable locations such as the user's home, workspace, /tmp, or another explicitly prepared directory.
+- Do not assume a fixed UID at runtime. OpenShift commonly runs containers with an arbitrary UID under its SCC model. Writable directories should be owned by group 0 and have group permissions equivalent to user permissions, e.g. `chgrp -R 0 ... && chmod -R g=u ...`.
+- Do not require root at runtime. Install RPMs/system libraries while building the image, then switch back to the notebook user.
+- Avoid writing into arbitrary system paths at runtime. Anything the notebook or Python stack needs to modify should be under writable locations such as the user's home, workspace, `/tmp`, or another explicitly prepared directory.
 - Do not listen on privileged ports <1024. Arbitrary non-root UIDs cannot bind them.
-Be careful with software that requires /etc/passwd lookup. An OpenShift-assigned UID may not exist in /etc/passwd; some applications break on whoami, home-directory resolution, etc. Red Hat documents the dynamic passwd-entry pattern for software that requires it.
+- Be careful with software that requires `/etc/passwd` lookup. An OpenShift-assigned UID may not exist in `/etc/passwd`; some applications break on `whoami`, home-directory resolution, etc.
 - Bake stable dependencies into the image. Installing packages manually from Jupyter is fine experimentally, but those changes are not a reliable/reproducible environment after restart. Custom images are the intended solution for shared/stable dependencies.
+- Use `registry.access.redhat.com` (no auth) instead of `registry.redhat.io` (requires auth) for UBI base images when possible.

@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: custom-workbenches
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: custom-datascience-workbench
+  namespace: custom-workbenches
+spec:
+  lookupPolicy:
+    local: true
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: custom-datascience-workbench
+  namespace: redhat-ods-applications
+  labels:
+    opendatahub.io/notebook-image: "true"
+  annotations:
+    opendatahub.io/notebook-image-name: "Custom Data Science"
+    opendatahub.io/notebook-image-desc: "Data Science notebook with XGBoost, LightGBM, SHAP, and git-lfs pre-installed"
+spec:
+  lookupPolicy:
+    local: true
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: custom-datascience-workbench
+  namespace: custom-workbenches
+spec:
+  output:
+    to:
+      kind: ImageStreamTag
+      name: custom-datascience-workbench:latest
+  source:
+    type: Binary
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Containerfile
+  triggers: []

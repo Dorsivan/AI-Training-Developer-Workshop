@@ -1,0 +1,40 @@
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: custom-jupyter-workbench
+  namespace: custom-workbenches
+spec:
+  lookupPolicy:
+    local: true
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: custom-jupyter-workbench
+  namespace: redhat-ods-applications
+  labels:
+    opendatahub.io/notebook-image: "true"
+  annotations:
+    opendatahub.io/notebook-image-name: "Custom Jupyter (from scratch)"
+    opendatahub.io/notebook-image-desc: "Minimal JupyterLab workbench built from UBI9 with pandas, scikit-learn, and matplotlib"
+spec:
+  lookupPolicy:
+    local: true
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: custom-jupyter-workbench
+  namespace: custom-workbenches
+spec:
+  output:
+    to:
+      kind: ImageStreamTag
+      name: custom-jupyter-workbench:latest
+  source:
+    type: Binary
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Containerfile
+  triggers: []

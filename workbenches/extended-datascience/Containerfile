@@ -1,0 +1,14 @@
+FROM quay.io/modh/odh-generic-data-science-notebook@sha256:76e6af79c601a323f75a58e7005de0beac66b8cccc3d2b67efb6d11d85f0cfa1
+
+USER 0
+
+RUN dnf install -y git-lfs jq && \
+    dnf clean all
+
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt && \
+    rm /tmp/requirements.txt
+
+RUN chgrp -R 0 /opt/app-root && chmod -R g=u /opt/app-root
+
+USER 1001

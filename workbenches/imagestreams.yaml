@@ -1,0 +1,41 @@
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: custom-jupyter-workbench
+  namespace: redhat-ods-applications
+  labels:
+    opendatahub.io/notebook-image: "true"
+  annotations:
+    opendatahub.io/notebook-image-name: "Custom Jupyter (from scratch)"
+    opendatahub.io/notebook-image-desc: "Minimal JupyterLab workbench built from UBI9 with pandas, scikit-learn, and matplotlib"
+spec:
+  lookupPolicy:
+    local: false
+  tags:
+    - name: latest
+      from:
+        kind: DockerImage
+        name: quay.io/rh-ee-dsivan/custom-jupyter-workbench:latest
+      referencePolicy:
+        type: Source
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: custom-datascience-workbench
+  namespace: redhat-ods-applications
+  labels:
+    opendatahub.io/notebook-image: "true"
+  annotations:
+    opendatahub.io/notebook-image-name: "Custom Data Science"
+    opendatahub.io/notebook-image-desc: "Data Science notebook with XGBoost, LightGBM, SHAP, and git-lfs pre-installed"
+spec:
+  lookupPolicy:
+    local: false
+  tags:
+    - name: latest
+      from:
+        kind: DockerImage
+        name: quay.io/rh-ee-dsivan/custom-datascience-workbench:latest
+      referencePolicy:
+        type: Source

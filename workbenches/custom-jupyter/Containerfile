@@ -1,0 +1,30 @@
+FROM registry.access.redhat.com/ubi9/python-311:latest
+
+USER 0
+
+RUN dnf install -y gcc python3-devel procps-ng && \
+    dnf clean all
+
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt && \
+    rm /tmp/requirements.txt
+
+RUN mkdir -p /opt/app-root/etc/jupyter /opt/app-root/bin
+COPY jupyter_server_config.py /opt/app-root/etc/jupyter/
+COPY start-notebook.sh /opt/app-root/bin/
+
+RUN chmod +x /opt/app-root/bin/start-notebook.sh && \
+    mkdir -p /opt/app-root/src && \
+    chgrp -R 0 /opt/app-root && chmod -R g=u /opt/app-root
+
+ENV HOME=/opt/app-root/src \
+    JUPYTER_CONFIG_DIR=/opt/app-root/etc/jupyter \
+    APP_ROOT=/opt/app-root \
+    PATH=/opt/app-root/src/.local/bin:/opt/app-root/bin:$PATH
+
+USER 1001
+WORKDIR /opt/app-root/src
+
+EXPOSE 8080
+
+ENTRYPOINT ["start-notebook.sh"]

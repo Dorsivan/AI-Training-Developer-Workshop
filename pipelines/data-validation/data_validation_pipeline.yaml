@@ -4,9 +4,10 @@
 # Inputs:
 #    null_fraction: float [Default: 0.05]
 #    num_rows: int [Default: 100.0]
+#    pvc_name: str [Default: 'data-validation-shared-data']
 #    pvc_size: str [Default: '1Gi']
 #    quality_threshold: float [Default: 0.8]
-#    storage_class: str [Default: '']
+#    storage_class: str [Default: 'nfs']
 components:
   comp-condition-2:
     dag:
@@ -35,6 +36,8 @@ components:
             name: transform-data
     inputDefinitions:
       parameters:
+        pipelinechannel--pvc_name:
+          parameterType: STRING
         pipelinechannel--quality_threshold:
           parameterType: NUMBER_DOUBLE
         pipelinechannel--validate-data-Output:
@@ -66,6 +69,8 @@ components:
             name: send-alert
     inputDefinitions:
       parameters:
+        pipelinechannel--pvc_name:
+          parameterType: STRING
         pipelinechannel--quality_threshold:
           parameterType: NUMBER_DOUBLE
         pipelinechannel--validate-data-Output:
@@ -78,6 +83,8 @@ components:
             name: comp-condition-2
           inputs:
             parameters:
+              pipelinechannel--pvc_name:
+                componentInputParameter: pipelinechannel--pvc_name
               pipelinechannel--quality_threshold:
                 componentInputParameter: pipelinechannel--quality_threshold
               pipelinechannel--validate-data-Output:
@@ -92,6 +99,8 @@ components:
             name: comp-condition-3
           inputs:
             parameters:
+              pipelinechannel--pvc_name:
+                componentInputParameter: pipelinechannel--pvc_name
               pipelinechannel--quality_threshold:
                 componentInputParameter: pipelinechannel--quality_threshold
               pipelinechannel--validate-data-Output:
@@ -103,6 +112,8 @@ components:
               >= inputs.parameter_values[''pipelinechannel--quality_threshold''])'
     inputDefinitions:
       parameters:
+        pipelinechannel--pvc_name:
+          parameterType: STRING
         pipelinechannel--quality_threshold:
           parameterType: NUMBER_DOUBLE
         pipelinechannel--validate-data-Output:
@@ -112,39 +123,59 @@ components:
     inputDefinitions:
       parameters:
         access_modes:
-          description: 'AccessModes to request for the provisioned PVC. May
-
-            be one or more of ``''ReadWriteOnce''``, ``''ReadOnlyMany''``, ``''ReadWriteMany''``,
-            or
-
-            ``''ReadWriteOncePod''``. Corresponds to `PersistentVolumeClaim.spec.accessModes
-            <https://kubernetes.io/docs/concepts/storage/persistent-volumes/#access-modes>`_.'
+          description: Values for ``PersistentVolumeClaim.spec.accessModes``.
           parameterType: LIST
         annotations:
-          description: Annotations for the PVC's metadata. Corresponds to `PersistentVolumeClaim.metadata.annotations
-            <https://kubernetes.io/docs/reference/kubernetes-api/config-and-storage-resources/persistent-volume-claim-v1/#PersistentVolumeClaim>`_.
+          description: 'Annotations for the PVC''s metadata. Corresponds to
+
+            `PersistentVolumeClaim.metadata.annotations
+
+            <https://kubernetes.io/docs/reference/kubernetes-api/config-and-storage-resources/persistent-volume-claim-v1/#PersistentVolumeClaim>`_.'
+          isOptional: true
+          parameterType: STRUCT
+        data_source:
+          description: 'Specifies the data source for the PVC. This can be used to
+
+            create a PVC from a VolumeSnapshot or to clone an existing PVC.
+
+            Should be a dictionary with ``''apiGroup''``, ``''kind''``, and
+
+            ``''name''`` keys. For example:
+
+            ``{''apiGroup'': ''snapshot.storage.k8s.io'', ''kind'': ''VolumeSnapshot'',
+            ''name'': ''my-snapshot''}``.
+
+            Corresponds to `PersistentVolumeClaim.spec.dataSource
+
+            <https://kubernetes.io/docs/reference/kubernetes-api/config-and-storage-resources/persistent-volume-claim-v1/#PersistentVolumeClaimSpec>`_.'
           isOptional: true
           parameterType: STRUCT
         pvc_name:
-          description: 'Name of the PVC. Corresponds to `PersistentVolumeClaim.metadata.name
-            <https://kubernetes.io/docs/reference/kubernetes-api/config-and-storage-resources/persistent-volume-claim-v1/#PersistentVolumeClaim>`_.
-            Only one of ``pvc_name`` and ``pvc_name_suffix`` can
+          description: 'Name of the PVC. Corresponds to
 
-            be provided.'
+            `PersistentVolumeClaim.metadata.name
+
+            <https://kubernetes.io/docs/reference/kubernetes-api/config-and-storage-resources/persistent-volume-claim-v1/#PersistentVolumeClaim>`_.
+
+            Only one of ``pvc_name`` and ``pvc_name_suffix`` can be provided.'
           isOptional: true
           parameterType: STRING
         pvc_name_suffix:
           description: 'Prefix to use for a dynamically generated name, which
 
-            will take the form ``<argo-workflow-name>-<pvc_name_suffix>``. Only one
+            will take the form ``<argo-workflow-name>-<pvc_name_suffix>``. Only
 
-            of ``pvc_name`` and ``pvc_name_suffix`` can be provided.'
+            one of ``pvc_name`` and ``pvc_name_suffix`` can be provided.'
           isOptional: true
           parameterType: STRING
         size:
-          description: The size of storage requested by the PVC that will be provisioned.
-            For example, ``'5Gi'``. Corresponds to `PersistentVolumeClaim.spec.resources.requests.storage
-            <https://kubernetes.io/docs/reference/kubernetes-api/config-and-storage-resources/persistent-volume-claim-v1/#PersistentVolumeClaimSpec>`_.
+          description: 'The size of storage requested by the PVC that will be
+
+            provisioned. For example, ``''5Gi''``. Corresponds to
+
+            `PersistentVolumeClaim.spec.resources.requests.storage
+
+            <https://kubernetes.io/docs/reference/kubernetes-api/config-and-storage-resources/persistent-volume-claim-v1/#PersistentVolumeClaimSpec>`_.'
           parameterType: STRING
         storage_class_name:
           defaultValue: ''
@@ -160,7 +191,10 @@ components:
 
             provisioned PersistentVolumeClaim. Used for statically
 
-            specified PV only. Corresponds to `PersistentVolumeClaim.spec.volumeName
+            specified PV only. Corresponds to
+
+            `PersistentVolumeClaim.spec.volumeName
+
             <https://kubernetes.io/docs/reference/kubernetes-api/config-and-storage-resources/persistent-volume-claim-v1/#PersistentVolumeClaimSpec>`_.'
           isOptional: true
           parameterType: STRING
@@ -250,7 +284,7 @@ deploymentSpec:
         - -c
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
-          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.12.1'\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
           $0\" \"$@\"\n"
         - sh
@@ -285,6 +319,15 @@ deploymentSpec:
           \n    summary_str = json.dumps(summary)\n    print(f\"Report generated:\
           \ {summary_str}\")\n    return summary_str\n\n"
         image: registry.redhat.io/ubi9/python-311:latest
+        resources:
+          cpuLimit: 0.5
+          cpuRequest: 0.5
+          memoryLimit: 0.536870912
+          memoryRequest: 0.536870912
+          resourceCpuLimit: 500m
+          resourceCpuRequest: 500m
+          resourceMemoryLimit: 512Mi
+          resourceMemoryRequest: 512Mi
     exec-ingest-data:
       container:
         args:
@@ -297,7 +340,7 @@ deploymentSpec:
         - -c
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
-          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.12.1'\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
           $0\" \"$@\"\n"
         - sh
@@ -328,6 +371,15 @@ deploymentSpec:
           \  writer.writerow(row)\n\n    print(f\"Ingested {num_rows} rows to {output_path}\"\
           )\n    return output_path\n\n"
         image: registry.redhat.io/ubi9/python-311:latest
+        resources:
+          cpuLimit: 0.5
+          cpuRequest: 0.5
+          memoryLimit: 0.536870912
+          memoryRequest: 0.536870912
+          resourceCpuLimit: 500m
+          resourceCpuRequest: 500m
+          resourceMemoryLimit: 512Mi
+          resourceMemoryRequest: 512Mi
     exec-quarantine-data:
       container:
         args:
@@ -340,7 +392,7 @@ deploymentSpec:
         - -c
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
-          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.12.1'\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
           $0\" \"$@\"\n"
         - sh
@@ -363,6 +415,15 @@ deploymentSpec:
           raw_data.csv\")\n    shutil.copy2(source_path, quarantine_path)\n\n    print(f\"\
           Data quarantined to {quarantine_path}\")\n    return quarantine_path\n\n"
         image: registry.redhat.io/ubi9/python-311:latest
+        resources:
+          cpuLimit: 0.5
+          cpuRequest: 0.5
+          memoryLimit: 0.536870912
+          memoryRequest: 0.536870912
+          resourceCpuLimit: 500m
+          resourceCpuRequest: 500m
+          resourceMemoryLimit: 512Mi
+          resourceMemoryRequest: 512Mi
     exec-send-alert:
       container:
         args:
@@ -375,7 +436,7 @@ deploymentSpec:
         - -c
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
-          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.12.1'\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
           $0\" \"$@\"\n"
         - sh
@@ -398,6 +459,15 @@ deploymentSpec:
           \  print(alert_message)\n    print(\"=\" * 60)\n    return alert_message\n\
           \n"
         image: registry.redhat.io/ubi9/python-311:latest
+        resources:
+          cpuLimit: 0.5
+          cpuRequest: 0.5
+          memoryLimit: 0.536870912
+          memoryRequest: 0.536870912
+          resourceCpuLimit: 500m
+          resourceCpuRequest: 500m
+          resourceMemoryLimit: 512Mi
+          resourceMemoryRequest: 512Mi
     exec-transform-data:
       container:
         args:
@@ -410,7 +480,7 @@ deploymentSpec:
         - -c
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
-          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.12.1'\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
           $0\" \"$@\"\n"
         - sh
@@ -443,6 +513,15 @@ deploymentSpec:
           \    print(f\"Written to {output_path}\")\n    return len(unique_rows)\n\
           \n"
         image: registry.redhat.io/ubi9/python-311:latest
+        resources:
+          cpuLimit: 0.5
+          cpuRequest: 0.5
+          memoryLimit: 0.536870912
+          memoryRequest: 0.536870912
+          resourceCpuLimit: 500m
+          resourceCpuRequest: 500m
+          resourceMemoryLimit: 512Mi
+          resourceMemoryRequest: 512Mi
     exec-validate-data:
       container:
         args:
@@ -455,7 +534,7 @@ deploymentSpec:
         - -c
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
-          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.12.1'\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
           $0\" \"$@\"\n"
         - sh
@@ -506,6 +585,15 @@ deploymentSpec:
           \  f\"Duplicates: {duplicate_count}\"\n    )\n    return quality_score\n\
           \n"
         image: registry.redhat.io/ubi9/python-311:latest
+        resources:
+          cpuLimit: 0.5
+          cpuRequest: 0.5
+          memoryLimit: 0.536870912
+          memoryRequest: 0.536870912
+          resourceCpuLimit: 500m
+          resourceCpuRequest: 500m
+          resourceMemoryLimit: 512Mi
+          resourceMemoryRequest: 512Mi
 pipelineInfo:
   description: Validates ingested data quality and conditionally transforms good data
     or quarantines bad data with an alert notification. Dynamically provisions a PVC
@@ -518,10 +606,11 @@ root:
         componentRef:
           name: comp-condition-branches-1
         dependentTasks:
-        - createpvc
         - validate-data
         inputs:
           parameters:
+            pipelinechannel--pvc_name:
+              componentInputParameter: pvc_name
             pipelinechannel--quality_threshold:
               componentInputParameter: quality_threshold
             pipelinechannel--validate-data-Output:
@@ -541,9 +630,8 @@ root:
               runtimeValue:
                 constant:
                 - ReadWriteOnce
-            pvc_name_suffix:
-              runtimeValue:
-                constant: -shared-data
+            pvc_name:
+              componentInputParameter: pvc_name
             size:
               componentInputParameter: pvc_size
             storage_class_name:
@@ -557,13 +645,10 @@ root:
           name: comp-deletepvc
         dependentTasks:
         - condition-branches-1
-        - createpvc
         inputs:
           parameters:
             pvc_name:
-              taskOutputParameter:
-                outputParameterKey: name
-                producerTask: createpvc
+              componentInputParameter: pvc_name
         taskInfo:
           name: deletepvc
       ingest-data:
@@ -587,7 +672,6 @@ root:
         componentRef:
           name: comp-validate-data
         dependentTasks:
-        - createpvc
         - ingest-data
         inputs:
           parameters:
@@ -607,6 +691,10 @@ root:
         defaultValue: 100.0
         isOptional: true
         parameterType: NUMBER_INTEGER
+      pvc_name:
+        defaultValue: data-validation-shared-data
+        isOptional: true
+        parameterType: STRING
       pvc_size:
         defaultValue: 1Gi
         isOptional: true
@@ -616,43 +704,68 @@ root:
         isOptional: true
         parameterType: NUMBER_DOUBLE
       storage_class:
-        defaultValue: ''
+        defaultValue: nfs
         isOptional: true
         parameterType: STRING
 schemaVersion: 2.1.0
-sdkVersion: kfp-2.12.1
+sdkVersion: kfp-2.17.0
 ---
 platforms:
   kubernetes:
     deploymentSpec:
       executors:
         exec-generate-report:
+          podMetadata:
+            labels:
+              kueue.x-k8s.io/priority-class: pipeline-default-priority
+              kueue.x-k8s.io/queue-name: team-a-local-queue
           pvcMount:
-          - mountPath: /mnt/shared
-            taskOutputParameter:
-              outputParameterKey: name
-              producerTask: createpvc
+          - componentInputParameter: pipelinechannel--pvc_name
+            mountPath: /mnt/shared
+            pvcNameParameter:
+              componentInputParameter: pipelinechannel--pvc_name
         exec-ingest-data:
+          podMetadata:
+            labels:
+              kueue.x-k8s.io/priority-class: pipeline-default-priority
+              kueue.x-k8s.io/queue-name: team-a-local-queue
           pvcMount:
-          - mountPath: /mnt/shared
-            taskOutputParameter:
-              outputParameterKey: name
-              producerTask: createpvc
+          - componentInputParameter: pvc_name
+            mountPath: /mnt/shared
+            pvcNameParameter:
+              componentInputParameter: pvc_name
         exec-quarantine-data:
+          podMetadata:
+            labels:
+              kueue.x-k8s.io/priority-class: pipeline-default-priority
+              kueue.x-k8s.io/queue-name: team-a-local-queue
           pvcMount:
-          - mountPath: /mnt/shared
-            taskOutputParameter:
-              outputParameterKey: name
-              producerTask: createpvc
+          - componentInputParameter: pipelinechannel--pvc_name
+            mountPath: /mnt/shared
+            pvcNameParameter:
+              componentInputParameter: pipelinechannel--pvc_name
+        exec-send-alert:
+          podMetadata:
+            labels:
+              kueue.x-k8s.io/priority-class: pipeline-default-priority
+              kueue.x-k8s.io/queue-name: team-a-local-queue
         exec-transform-data:
+          podMetadata:
+            labels:
+              kueue.x-k8s.io/priority-class: pipeline-default-priority
+              kueue.x-k8s.io/queue-name: team-a-local-queue
           pvcMount:
-          - mountPath: /mnt/shared
-            taskOutputParameter:
-              outputParameterKey: name
-              producerTask: createpvc
+          - componentInputParameter: pipelinechannel--pvc_name
+            mountPath: /mnt/shared
+            pvcNameParameter:
+              componentInputParameter: pipelinechannel--pvc_name
         exec-validate-data:
+          podMetadata:
+            labels:
+              kueue.x-k8s.io/priority-class: pipeline-default-priority
+              kueue.x-k8s.io/queue-name: team-a-local-queue
           pvcMount:
-          - mountPath: /mnt/shared
-            taskOutputParameter:
-              outputParameterKey: name
-              producerTask: createpvc
+          - componentInputParameter: pvc_name
+            mountPath: /mnt/shared
+            pvcNameParameter:
+              componentInputParameter: pvc_name
