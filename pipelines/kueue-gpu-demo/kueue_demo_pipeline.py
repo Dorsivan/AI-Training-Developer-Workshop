@@ -94,6 +94,12 @@ def gpu_pipeline():
     train = use_kueue(gpu_training(data_status=prep.output), cpu="2", memory="4Gi")
     train.set_accelerator_type("nvidia.com/gpu")
     train.set_accelerator_limit(1)
+    train.set_retry(
+        num_retries=3,
+        backoff_duration="30s",
+        backoff_factor=2.0,
+        backoff_max_duration="5m",
+    )
 
     eval_task = use_kueue(evaluation(model_status=train.output), cpu="500m", memory="256Mi")
 

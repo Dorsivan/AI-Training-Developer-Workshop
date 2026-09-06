@@ -1,0 +1,54 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gpu-training-team-b-1
+  namespace: second-ai-project
+  labels:
+    kueue.x-k8s.io/queue-name: team-b-local-queue
+    demo: kueue-preemption
+spec:
+  suspend: true
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        demo: kueue-preemption
+        team: b
+        job-index: "1"
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: training
+        image: quay.io/modh/cuda-notebooks:cuda-jupyter-minimal-ubi9-python-3.11-20250630
+        env:
+        - name: JOB_NAME
+          value: gpu-training-team-b-1
+        - name: TRAIN_DURATION
+          value: "90"
+        command:
+        - python3
+        - -c
+        - |
+          import time, datetime, subprocess, os
+
+          job = os.environ["JOB_NAME"]
+          duration = int(os.environ["TRAIN_DURATION"])
+
+          print(f"[{datetime.datetime.now():%H:%M:%S}] {job} — training started ({duration}s)")
+          subprocess.run(["nvidia-smi"], check=False)
+
+          for elapsed in range(15, duration + 1, 15):
+              time.sleep(15)
+              pct = 100 * elapsed // duration
+              print(f"[{datetime.datetime.now():%H:%M:%S}] {job} — {elapsed}/{duration}s ({pct}%)")
+
+          print(f"[{datetime.datetime.now():%H:%M:%S}] {job} — training complete")
+        resources:
+          requests:
+            cpu: "2"
+            memory: 4Gi
+            nvidia.com/gpu: "1"
+          limits:
+            cpu: "2"
+            memory: 4Gi
+            nvidia.com/gpu: "1"

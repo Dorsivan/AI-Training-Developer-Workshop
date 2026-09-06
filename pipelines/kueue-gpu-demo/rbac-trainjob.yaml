@@ -1,0 +1,21 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pytorchjob-manager
+rules:
+- apiGroups: ["kubeflow.org"]
+  resources: ["pytorchjobs"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pipeline-runner-pytorchjob
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: pytorchjob-manager
+subjects:
+- kind: ServiceAccount
+  name: pipeline-runner-dspa

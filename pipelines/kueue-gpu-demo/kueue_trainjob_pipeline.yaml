@@ -1,0 +1,289 @@
+# PIPELINE DEFINITION
+# Name: kfp-kueue-gpu-demo
+# Description: GPU pipeline with Kueue-managed PyTorchJob. The KFP component launches and watches a kubeflow.org/v1 PyTorchJob that Kueue can suspend/preempt/re-admit natively.
+components:
+  comp-evaluation:
+    executorLabel: exec-evaluation
+    inputDefinitions:
+      parameters:
+        model_status:
+          parameterType: STRING
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+  comp-preprocessing:
+    executorLabel: exec-preprocessing
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+  comp-run-training-job:
+    executorLabel: exec-run-training-job
+    inputDefinitions:
+      parameters:
+        data_status:
+          parameterType: STRING
+        gpus_per_replica:
+          defaultValue: 1.0
+          isOptional: true
+          parameterType: NUMBER_INTEGER
+        kueue_queue:
+          parameterType: STRING
+        num_workers:
+          defaultValue: 0.0
+          isOptional: true
+          parameterType: NUMBER_INTEGER
+        poll_interval:
+          defaultValue: 10.0
+          isOptional: true
+          parameterType: NUMBER_INTEGER
+        train_duration:
+          defaultValue: 300.0
+          isOptional: true
+          parameterType: NUMBER_INTEGER
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+deploymentSpec:
+  executors:
+    exec-evaluation:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - evaluation
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef evaluation(model_status: str) -> str:\n    import time\n    print(f\"\
+          Evaluating model (input: {model_status})\")\n    time.sleep(20)\n    print(\"\
+          Evaluation complete\")\n    return \"evaluated\"\n\n"
+        image: registry.access.redhat.com/ubi9/python-311:latest
+        resources:
+          cpuLimit: 0.5
+          cpuRequest: 0.5
+          memoryLimit: 0.268435456
+          memoryRequest: 0.268435456
+          resourceCpuLimit: 500m
+          resourceCpuRequest: 500m
+          resourceMemoryLimit: 256Mi
+          resourceMemoryRequest: 256Mi
+    exec-preprocessing:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - preprocessing
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef preprocessing() -> str:\n    import time\n    print(\"Preprocessing\
+          \ data...\")\n    time.sleep(20)\n    print(\"Preprocessing complete\")\n\
+          \    return \"preprocessed\"\n\n"
+        image: registry.access.redhat.com/ubi9/python-311:latest
+        resources:
+          cpuLimit: 0.5
+          cpuRequest: 0.5
+          memoryLimit: 0.268435456
+          memoryRequest: 0.268435456
+          resourceCpuLimit: 500m
+          resourceCpuRequest: 500m
+          resourceMemoryLimit: 256Mi
+          resourceMemoryRequest: 256Mi
+    exec-run-training-job:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - run_training_job
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kubernetes'\
+          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef run_training_job(\n    data_status: str,\n    kueue_queue: str,\n\
+          \    train_duration: int = 300,\n    num_workers: int = 0,\n    gpus_per_replica:\
+          \ int = 1,\n    poll_interval: int = 10,\n) -> str:\n    \"\"\"Launch a\
+          \ Kueue-managed PyTorchJob and wait for it to complete.\n\n    This component\
+          \ does NOT request GPUs itself.  It creates a\n    kubeflow.org/v1 PyTorchJob\
+          \ with Kueue labels, then polls\n    until completion.  Kueue can freely\
+          \ suspend/preempt/re-admit\n    the PyTorchJob without affecting this Argo\
+          \ node.\n    \"\"\"\n    import datetime\n    import time\n    import uuid\n\
+          \n    from kubernetes import client, config\n\n    GROUP = \"kubeflow.org\"\
+          \n    VERSION = \"v1\"\n    PLURAL = \"pytorchjobs\"\n\n    config.load_incluster_config()\n\
+          \    custom_api = client.CustomObjectsApi()\n    core_v1 = client.CoreV1Api()\n\
+          \n    namespace = open(\"/var/run/secrets/kubernetes.io/serviceaccount/namespace\"\
+          ).read()\n    job_name = f\"gpu-train-{uuid.uuid4().hex[:8]}\"\n\n    training_script\
+          \ = f\"\"\"\nimport time, datetime, subprocess, os\nprint(f\"[{{datetime.datetime.now():%H:%M:%S}}]\
+          \ Training started (input: {data_status})\")\nsubprocess.run([\"nvidia-smi\"\
+          ], check=False)\nduration = {train_duration}\nfor elapsed in range(15, duration\
+          \ + 1, 15):\n    time.sleep(15)\n    pct = 100 * elapsed // duration\n \
+          \   print(f\"[{{datetime.datetime.now():%H:%M:%S}}] Progress: {{elapsed}}/{{duration}}s\
+          \ ({{pct}}%)\")\nprint(f\"[{{datetime.datetime.now():%H:%M:%S}}] Training\
+          \ complete\")\n\"\"\"\n\n    container = {\n        \"name\": \"pytorch\"\
+          ,\n        \"image\": \"quay.io/modh/cuda-notebooks:cuda-jupyter-minimal-ubi9-python-3.11-20250630\"\
+          ,\n        \"command\": [\"python3\", \"-c\", training_script],\n      \
+          \  \"resources\": {\n            \"requests\": {\n                \"cpu\"\
+          : \"2\",\n                \"memory\": \"4Gi\",\n                \"nvidia.com/gpu\"\
+          : str(gpus_per_replica),\n            },\n            \"limits\": {\n  \
+          \              \"cpu\": \"2\",\n                \"memory\": \"4Gi\",\n \
+          \               \"nvidia.com/gpu\": str(gpus_per_replica),\n           \
+          \ },\n        },\n    }\n\n    replica_spec = {\n        \"replicas\": 1,\n\
+          \        \"restartPolicy\": \"OnFailure\",\n        \"template\": {\n  \
+          \          \"spec\": {\n                \"containers\": [container],\n \
+          \           },\n        },\n    }\n\n    pytorch_job = {\n        \"apiVersion\"\
+          : f\"{GROUP}/{VERSION}\",\n        \"kind\": \"PyTorchJob\",\n        \"\
+          metadata\": {\n            \"name\": job_name,\n            \"namespace\"\
+          : namespace,\n            \"labels\": {\n                \"kueue.x-k8s.io/queue-name\"\
+          : kueue_queue,\n                \"kfp-training-job\": \"true\",\n      \
+          \      },\n        },\n        \"spec\": {\n            \"suspend\": True,\n\
+          \            \"pytorchReplicaSpecs\": {\n                \"Master\": replica_spec,\n\
+          \            },\n        },\n    }\n\n    if num_workers > 0:\n        worker_spec\
+          \ = {\n            \"replicas\": num_workers,\n            \"restartPolicy\"\
+          : \"OnFailure\",\n            \"template\": {\n                \"spec\"\
+          : {\n                    \"containers\": [container],\n                },\n\
+          \            },\n        }\n        pytorch_job[\"spec\"][\"pytorchReplicaSpecs\"\
+          ][\"Worker\"] = worker_spec\n\n    total_gpus = (1 + num_workers) * gpus_per_replica\n\
+          \    print(f\"[{datetime.datetime.now():%H:%M:%S}] Creating PyTorchJob {job_name}\
+          \ \"\n          f\"(queue={kueue_queue}, master=1, workers={num_workers},\
+          \ \"\n          f\"gpus/replica={gpus_per_replica}, total_gpus={total_gpus},\
+          \ \"\n          f\"duration={train_duration}s)\")\n    custom_api.create_namespaced_custom_object(\n\
+          \        group=GROUP, version=VERSION, namespace=namespace,\n        plural=PLURAL,\
+          \ body=pytorch_job,\n    )\n\n    while True:\n        pj = custom_api.get_namespaced_custom_object(\n\
+          \            group=GROUP, version=VERSION, namespace=namespace,\n      \
+          \      plural=PLURAL, name=job_name,\n        )\n\n        conditions =\
+          \ {\n            c[\"type\"]: c[\"status\"]\n            for c in pj.get(\"\
+          status\", {}).get(\"conditions\", [])\n        }\n        suspended = pj.get(\"\
+          spec\", {}).get(\"suspend\", False)\n\n        if conditions.get(\"Succeeded\"\
+          ) == \"True\":\n            print(f\"[{datetime.datetime.now():%H:%M:%S}]\
+          \ PyTorchJob {job_name} succeeded\")\n            break\n\n        if conditions.get(\"\
+          Failed\") == \"True\":\n            msg = next(\n                (c.get(\"\
+          message\", \"\") for c in pj[\"status\"][\"conditions\"]\n             \
+          \    if c[\"type\"] == \"Failed\"),\n                \"\",\n           \
+          \ )\n            raise RuntimeError(f\"PyTorchJob {job_name} failed: {msg}\"\
+          )\n\n        if suspended:\n            status = \"suspended (Kueue preempted\
+          \ or waiting for admission)\"\n        elif conditions.get(\"Running\")\
+          \ == \"True\":\n            status = \"running\"\n        elif conditions.get(\"\
+          Created\") == \"True\":\n            status = \"created, waiting for pods\"\
+          \n        else:\n            status = \"pending\"\n\n        print(f\"[{datetime.datetime.now():%H:%M:%S}]\
+          \ PyTorchJob {job_name}: {status}\")\n        time.sleep(poll_interval)\n\
+          \n    try:\n        pods = core_v1.list_namespaced_pod(\n            namespace=namespace,\n\
+          \            label_selector=f\"training.kubeflow.org/job-name={job_name}\"\
+          ,\n        )\n        for pod in pods.items:\n            try:\n       \
+          \         log = core_v1.read_namespaced_pod_log(\n                    name=pod.metadata.name,\
+          \ namespace=namespace, tail_lines=5,\n                )\n              \
+          \  print(f\"--- {pod.metadata.name} (last 5 lines) ---\")\n            \
+          \    print(log)\n            except Exception:\n                pass\n \
+          \   except Exception:\n        pass\n\n    return \"trained\"\n\n"
+        image: registry.access.redhat.com/ubi9/python-311:latest
+        resources:
+          cpuLimit: 0.5
+          cpuRequest: 0.5
+          memoryLimit: 0.268435456
+          memoryRequest: 0.268435456
+          resourceCpuLimit: 500m
+          resourceCpuRequest: 500m
+          resourceMemoryLimit: 256Mi
+          resourceMemoryRequest: 256Mi
+pipelineInfo:
+  description: GPU pipeline with Kueue-managed PyTorchJob. The KFP component launches
+    and watches a kubeflow.org/v1 PyTorchJob that Kueue can suspend/preempt/re-admit
+    natively.
+  name: kfp-kueue-gpu-demo
+root:
+  dag:
+    tasks:
+      evaluation:
+        cachingOptions: {}
+        componentRef:
+          name: comp-evaluation
+        dependentTasks:
+        - run-training-job
+        inputs:
+          parameters:
+            model_status:
+              taskOutputParameter:
+                outputParameterKey: Output
+                producerTask: run-training-job
+        taskInfo:
+          name: evaluation
+      preprocessing:
+        cachingOptions: {}
+        componentRef:
+          name: comp-preprocessing
+        taskInfo:
+          name: preprocessing
+      run-training-job:
+        cachingOptions: {}
+        componentRef:
+          name: comp-run-training-job
+        dependentTasks:
+        - preprocessing
+        inputs:
+          parameters:
+            data_status:
+              taskOutputParameter:
+                outputParameterKey: Output
+                producerTask: preprocessing
+            kueue_queue:
+              runtimeValue:
+                constant: team-a-local-queue
+            train_duration:
+              runtimeValue:
+                constant: 300.0
+        taskInfo:
+          name: run-training-job
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.17.0

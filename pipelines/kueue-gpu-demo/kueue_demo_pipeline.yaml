@@ -187,6 +187,11 @@ root:
               taskOutputParameter:
                 outputParameterKey: Output
                 producerTask: preprocessing
+        retryPolicy:
+          backoffDuration: 30s
+          backoffFactor: 2.0
+          backoffMaxDuration: 300s
+          maxRetryCount: 3
         taskInfo:
           name: gpu-training
       preprocessing:
